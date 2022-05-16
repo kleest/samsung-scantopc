@@ -17,57 +17,20 @@
 # Dependencies: python-imaging-sane, python-pysnmp-common, python-pypdf, scanner working in sane
 #                              #t-k: python-pysnmp4 is the test replacement only in quantal,
 #     but virtual package ...-common also exists
-# for python2
-from __future__ import print_function
 
 __version__ = "0.4.5"
 
-import pysnmp
-# for python2
-from six.moves import http_client
+import datetime
+import os
+import os.path
 import re
 import time
 import xml.etree.ElementTree as ET
-import signal
-import os
-import os.path
 from string import Template
-import datetime
+
 from PIL import Image
+from six.moves import http_client
 
-# Circumvention for PDF save BUG
-# https://github.com/python-imaging/Pillow/issues/215
-# Found in Ubuntu 13.10
-try:
-    import pkg_resources
-
-    if pkg_resources.get_distribution("pillow").version == '2.0.0':
-        print("Using circumvention for PDF save because you use pillow 2.0.0")
-        Image.init()
-        orgPDFSave = Image.SAVE["PDF"]
-
-
-        def myPDF_save(im, fp, filename):
-            print(im.encoderconfig)
-            # get keyword arguments
-            im.encoderconfig = (
-                0,  # quality,
-                0,  # "progressive" in info or "progression" in info,
-                0,  # info.get("smooth", 0),
-                0,  # "optimize" in info,
-                0,  # info.get("streamtype", 0),
-                0, 0,  # dpi[0], dpi[1],
-                0,  # subsampling,
-                None)  # qtables
-            orgPDFSave(im, fp, filename)
-
-
-        Image.register_save("myPDF", myPDF_save)
-        Image.register_extension("myPDF", ".pdf")
-except Exception:
-    None
-
-from PIL import ImageOps
 import sane
 import sys, traceback
 import logging
@@ -83,12 +46,7 @@ import socket  # t-k: needed for TCP and UDP proxy to interfere with scanner com
 import multiprocessing  # t-k: need subprocesses for TCP and UDP proxy
 from urllib import request
 
-try:
-    import queue
-except ImportError:
-    # for python2
-    import Queue as queue
-import threading  # t-k: needed for QueueListener thread that handles logging
+import queue
 import errno  # t-k: needed for error handling in TCP proxy
 
 """
