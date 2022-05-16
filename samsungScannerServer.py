@@ -20,34 +20,33 @@
 
 __version__ = "0.4.5"
 
+import atexit
 import datetime
-import os
-import os.path
-import re
-import time
-import xml.etree.ElementTree as ET
-from string import Template
-
-from PIL import Image
-from six.moves import http_client
-
-import sane
-import sys, traceback
+import errno  # t-k: needed for error handling in TCP proxy
+import io
 import logging
 import logging.handlers
+import multiprocessing  # t-k: need subprocesses for TCP and UDP proxy
+import os
+import os.path
 import platform
-from optparse import OptionParser, OptionGroup
-from PyPDF3 import PdfFileWriter, PdfFileReader
-import io
-import atexit
 import pwd  # t-k: for automatically configured OUTPUT_PREFIX and OWNER(_UID)
+import queue
+import re
 import signal  # t-k: for correct handling of SIGTERM and so on (which atexit can't handle)
 import socket  # t-k: needed for TCP and UDP proxy to interfere with scanner commands needed for multipage
-import multiprocessing  # t-k: need subprocesses for TCP and UDP proxy
+import sys
+import time
+import traceback
+import xml.etree.ElementTree as ET
+from optparse import OptionParser, OptionGroup
+from string import Template
 from urllib import request
 
-import queue
-import errno  # t-k: needed for error handling in TCP proxy
+import sane
+from PIL import Image
+from PyPDF3 import PdfFileWriter, PdfFileReader
+from six.moves import http_client
 
 """
 Summary of messages exchanged in order to scan
@@ -61,7 +60,8 @@ register server: server -> scanner (HTTP POST) with:
 scanner answer:
 <?xml version="1.0" encoding="UTF-8"?><root><S2PC_Regi UserID ="Server-XP" Result="ADD_OK" InstanceID="27" /></root>
 
-query SNMP 1,3,6,1,4,1,236,11,5,11,81,11,7,2,1,2,<InstanceID> until is we get "1" in the first byte (user selected the server to scan).
+query SNMP 1,3,6,1,4,1,236,11,5,11,81,11,7,2,1,2,<InstanceID> until is we get "1" in the first byte (user selected the
+server to scan).
 Samsung Windows driver does this every 1/2 second
 
 send configuration options to scan: sever -> scanner (HTTP Post) with:
@@ -85,7 +85,8 @@ send configuration options to scan: sever -> scanner (HTTP Post) with:
 scanner answer:
 closes connection
 
-query SNMP 1,3,6,1,4,1,236,11,5,11,81,11,7,2,1,2,<InstanceID> until is we get "2" in the first byte (user has selected scan options based on the offered template).
+query SNMP 1,3,6,1,4,1,236,11,5,11,81,11,7,2,1,2,<InstanceID> until is we get "2" in the first byte (user has selected
+scan options based on the offered template).
 
 start a scan using SANE
 
@@ -105,7 +106,7 @@ if we want to unregister the server: sever -> scanner (HTTP Post) with:
 
 # HTTP Post functions
 
-def post_multipart(host, selector, fields, files, expectResponse=True):
+def post_multipart(host, selector, fields, files, exact_response=True):
     """
     Post fields and files to an http host as multipart/form-data.
     fields is a sequence of (name, value) elements for regular form fields.
@@ -122,7 +123,7 @@ def post_multipart(host, selector, fields, files, expectResponse=True):
         h.putheader('content-length', str(len(body)))
         h.endheaders()
         h.send(body)
-        if expectResponse:
+        if exact_response:
             response = h.getresponse()
             return response.read()
         else:
@@ -137,42 +138,42 @@ def encode_multipart_formdata(fields, files):
     files is a sequence of (name, filename, value) elements for data to be uploaded as files
     Return (content_type, body) ready for httplib.HTTP instance
     """
-    BOUNDARY = b'----------ThIs_Is_tHe_bouNdaRY_$'
-    CRLF = b'\r\n'
-    L = []
+    boundary = b'----------ThIs_Is_tHe_bouNdaRY_$'
+    crlf = b'\r\n'
+    stream = []
     for (key, value) in fields:
-        L.append(b'--' + BOUNDARY)
-        L.append(b'Content-Disposition: form-data; name="%d"' % key)
-        L.append(b'')
+        stream.append(b'--' + boundary)
+        stream.append(b'Content-Disposition: form-data; name="%d"' % key)
+        stream.append(b'')
         if type(value) != bytes:
             value = value.encode("utf-8")
-        L.append(value)
+        stream.append(value)
     for (key, filename, value) in files:
-        L.append(b'--' + BOUNDARY)
-        L.append(b'Content-Disposition: form-data; name="%d"; filename="%b"' % (key, filename.encode("utf-8")))
-        L.append(b'Content-Type: application/octet-stream')
-        L.append(b'')
+        stream.append(b'--' + boundary)
+        stream.append(b'Content-Disposition: form-data; name="%d"; filename="%b"' % (key, filename.encode("utf-8")))
+        stream.append(b'Content-Type: application/octet-stream')
+        stream.append(b'')
         if type(value) != bytes:
             value = value.encode("utf-8")
-        L.append(value)
-    L.append(b'--' + BOUNDARY + b'--')
-    L.append(b'')
-    body = CRLF.join(L)
-    content_type = b'multipart/form-data; boundary=%b' % BOUNDARY
+        stream.append(value)
+    stream.append(b'--' + boundary + b'--')
+    stream.append(b'')
+    body = crlf.join(stream)
+    content_type = b'multipart/form-data; boundary=%b' % boundary
     return content_type, body
 
 
-def registerServer(printing=True):
-    MSG = '<?xml version="1.0" encoding="UTF-8" ?>'
-    MSG += '<root>'
-    MSG += '<S2PC_Regi UserID="' + SERVER_NAME + '" UniqueID="' + SERVER_UID + '" RegiType="ADD" />'
-    MSG += '</root>'
+def server_register(printing=True):
+    msg = '<?xml version="1.0" encoding="UTF-8" ?>'
+    msg += '<root>'
+    msg += '<S2PC_Regi UserID="' + SERVER_NAME + '" UniqueID="' + SERVER_UID + '" RegiType="ADD" />'
+    msg += '</root>'
 
-    result = str(post_multipart(SCANNER_IP, '/IDS/ScanFaxToPC.cgi', [], [(1, "c:\IDS.XML", MSG)]))
+    result = str(post_multipart(SCANNER_IP, '/IDS/ScanFaxToPC.cgi', [], [(1, "c:\\IDS.XML", msg)]))
     # print result
     # <?xml version="1.0" encoding="UTF-8"?><root><S2PC_Regi UserID ="W510" Result="ADD_OK" InstanceID="29" /></root>
 
-    m = re.match('.*Result="ADD_OK" InstanceID="(\d+)"', result)
+    m = re.match(r'.*Result="ADD_OK" InstanceID="(\d+)"', result)
     if not m:
         raise NameError("Error registering server: " + result)
     else:
@@ -183,25 +184,25 @@ def registerServer(printing=True):
 
 
 # t-k: restructered function to be real refresh
-def refreshServer():
+def server_refresh():
     global SERVER_INSTANCE_ID
-    oldInstanceID = SERVER_INSTANCE_ID
-    SERVER_INSTANCE_ID = registerServer(printing=False)
-    if SERVER_INSTANCE_ID != oldInstanceID:
+    old_instance_id = SERVER_INSTANCE_ID
+    SERVER_INSTANCE_ID = server_register(printing=False)
+    if SERVER_INSTANCE_ID != old_instance_id:
         print("Refreshed server '%(SERVER_NAME)s' with UniqueID '%(SERVER_UID)s' has got" % globals())
         print("    new InstanceID '" + str(SERVER_INSTANCE_ID) + "'.")
     return SERVER_INSTANCE_ID
 
 
 # t-k: new function = easier to understand
-def unregisterServer():
-    uniqueID = SERVER_UID
-    MSG = '<?xml version="1.0" encoding="UTF-8" ?>'
-    MSG += '<root>'
-    MSG += '<S2PC_Regi UserID="' + SERVER_NAME + '" UniqueID="' + uniqueID + '" RegiType="DELETE" />'
-    MSG += '</root>'
+def server_unregister():
+    unique_id = SERVER_UID
+    msg = '<?xml version="1.0" encoding="UTF-8" ?>'
+    msg += '<root>'
+    msg += '<S2PC_Regi UserID="' + SERVER_NAME + '" UniqueID="' + unique_id + '" RegiType="DELETE" />'
+    msg += '</root>'
 
-    result = post_multipart(SCANNER_IP, '/IDS/ScanFaxToPC.cgi', [], [(1, "c:\IDS.XML", MSG)])
+    result = post_multipart(SCANNER_IP, '/IDS/ScanFaxToPC.cgi', [], [(1, "c:\\IDS.XML", msg)])
     # print result
     # <?xml version="1.0" encoding="UTF-8"?>
     #   <root><S2PC_Regi UserID ="server" Result="DELETE_OK" InstanceID="140" /></root>
@@ -213,7 +214,7 @@ def unregisterServer():
         print("Unregistered server '%(SERVER_NAME)s' with UniqueID '%(SERVER_UID)s'." % globals())
 
 
-def pushServerOptions():
+def push_server_options():
     """<?xml version="1.0" encoding="UTF-8" ?>
        <root>
          <S2PC_AppList>
@@ -231,28 +232,28 @@ def pushServerOptions():
         </S2PC_AppList>
      </root>"""
     root = ET.Element('root')
-    appList = ET.SubElement(root, 'S2PC_AppList')
+    app_list = ET.SubElement(root, 'S2PC_AppList')
 
     index = 0
     for option in OPTIONS:
         index += 1
-        listElement = ET.SubElement(appList, 'List')
-        ET.SubElement(listElement, 'AppIndex').attrib['Value'] = str(index)
-        ET.SubElement(listElement, 'AppName').attrib['Value'] = option["name"]
-        ET.SubElement(listElement, 'AppType').attrib['Value'] = 'MAC'
-        ET.SubElement(listElement, 'Resolution').attrib['Value'] = option["resolution"]
-        ET.SubElement(listElement, 'Color').attrib['Value'] = option["color"]
-        ET.SubElement(listElement, 'FileFormat').attrib['Value'] = option["format"]
-        ET.SubElement(listElement, 'ScanSize').attrib['Value'] = option["size"]
-        ET.SubElement(listElement, 'DuplexScan').attrib['Value'] = "DUPLEX_OFF"
-        ET.SubElement(listElement, 'Orientation').attrib['Value'] = "ORIENTATION_SIDEWAY"
+        list_element = ET.SubElement(app_list, 'List')
+        ET.SubElement(list_element, 'AppIndex').attrib['Value'] = str(index)
+        ET.SubElement(list_element, 'AppName').attrib['Value'] = option["name"]
+        ET.SubElement(list_element, 'AppType').attrib['Value'] = 'MAC'
+        ET.SubElement(list_element, 'Resolution').attrib['Value'] = option["resolution"]
+        ET.SubElement(list_element, 'Color').attrib['Value'] = option["color"]
+        ET.SubElement(list_element, 'FileFormat').attrib['Value'] = option["format"]
+        ET.SubElement(list_element, 'ScanSize').attrib['Value'] = option["size"]
+        ET.SubElement(list_element, 'DuplexScan').attrib['Value'] = "DUPLEX_OFF"
+        ET.SubElement(list_element, 'Orientation').attrib['Value'] = "ORIENTATION_SIDEWAY"
 
-    MSG = b'<?xml version="1.0" encoding="UTF-8" ?>\r\n' + ET.tostring(root)
-    # MSG=ET.tostring(root, encoding="UTF-8")
-    result = post_multipart(SCANNER_IP, '/IDS/ScanFaxToPC.cgi', [], [(1, "scantopc", MSG)], False)
+    msg = b'<?xml version="1.0" encoding="UTF-8" ?>\r\n' + ET.tostring(root)
+    # msg=ET.tostring(root, encoding="UTF-8")
+    post_multipart(SCANNER_IP, '/IDS/ScanFaxToPC.cgi', [], [(1, "scantopc", msg)], False)
 
 
-def queryUserOptions():
+def query_user_options():
     result = post_multipart(SCANNER_IP, '/IDS/UserSelect.xml', [], [(1, "scantopc", "")])
     # {'name':'Gray-S_PDF-75','color':'GRAY','resolution':'75','format':'S_PDF','size','a4'}
     # result='<?xml version="1.0" encoding="UTF-8"?><root><S2PC_Select><AppIndex Value="1"/>
@@ -273,85 +274,88 @@ def queryUserOptions():
 
 # SNMP queries
 
-def querySNMPVariable(ip, oid):
+def query_snmp_variable(ip, oid):
     from pysnmp.entity.rfc3413.oneliner import cmdgen
 
-    errorIndication, errorStatus, errorIndex, varBinds = cmdgen.CommandGenerator().getCmd(
+    error_indication, error_status, error_index, var_binds = cmdgen.CommandGenerator().getCmd(
         cmdgen.CommunityData('my-agent', 'public', 0),
         cmdgen.UdpTransportTarget((ip, 161)),
         oid)
 
-    returnValue = None
-    if errorIndication:
-        raise NameError('Error indication in SNMP query: %s' % errorIndication)  # t-k: %s to avoid TypeError
-    elif errorStatus:
-        raise NameError('Error status in SNMP query: %s' % errorStatus)  # t-k: %s to avoid TypeError
+    return_value = None
+    if error_indication:
+        raise NameError('Error indication in SNMP query: %s' % error_indication)  # t-k: %s to avoid TypeError
+    elif error_status:
+        raise NameError('Error status in SNMP query: %s' % error_status)  # t-k: %s to avoid TypeError
     else:
-        returnValue = varBinds
-    return returnValue
+        return_value = var_binds
+    return return_value
 
 
-def queryPrinterScanStatus(instanceID):
+def query_printer_scan_status(instance_id):
     # t-k: more descriptive Error handling and logging
     try:
-        result = querySNMPVariable(SCANNER_IP, (1, 3, 6, 1, 4, 1, 236, 11, 5, 11, 81, 11, 7, 2, 1, 2, instanceID))
+        result = query_snmp_variable(SCANNER_IP, (1, 3, 6, 1, 4, 1, 236, 11, 5, 11, 81, 11, 7, 2, 1, 2, instance_id))
         # (ObjectName('1.3.6.1.4.1.236.11.5.11.81.11.7.2.1.2.29'), OctetString('\x00\x00\x00\x00'))
         return result[0][1][0]
     except Exception as e:
         if 'result' not in locals():
             result = None
-        raise Exception(("Could not query printer scan status.\n" + ' ' * 4 + \
-                         "Result was '%(result)s'.\n" + ' ' * 4 + \
+        raise Exception(("Could not query printer scan status.\n" + ' ' * 4 +
+                         "Result was '%(result)s'.\n" + ' ' * 4 +
                          "Error message: %(e)s.") % locals())
 
 
 # Function for a single scan task
-def scannWorker():
-    refreshServer()
+def scann_worker():
+    server_refresh()
 
     # t-k: a little more descriptive logging
     print("Waiting for scan job ...")
-    # print ' '*4 + 'printer scan status: ' + str(queryPrinterScanStatus(SERVER_INSTANCE_ID)) + ' -- waiting for 1 ...'
+    # print ' '*4 + 'printer scan status: ' + str(query_printer_scan_status(SERVER_INSTANCE_ID)) + ' -- waiting for 1
+    # ...'
     i = 0
-    while (queryPrinterScanStatus(SERVER_INSTANCE_ID) != 1):
+    while query_printer_scan_status(SERVER_INSTANCE_ID) != 1:
         i += 1
-        if (i % 300 == 0):  # t-k: refresh every > 5 mins (server get's auto. unregistered after ~30 mins)
-            refreshServer()
+        if i % 300 == 0:  # t-k: refresh every > 5 mins (server get's auto. unregistered after ~30 mins)
+            server_refresh()
         time.sleep(1)
     print(' ' * 4 + 'Got it!')
 
-    pushServerOptions()
+    push_server_options()
 
     # t-k: a little more descriptive logging
     print("Waiting for user selection ...")
-    # print ' '*4 + 'printer scan status: ' + str(queryPrinterScanStatus(SERVER_INSTANCE_ID)) + ' -- waiting for 2 ...'
+    # print ' '*4 + 'printer scan status: ' + str(query_printer_scan_status(SERVER_INSTANCE_ID)) + ' -- waiting for 2
+    # ...'
 
     # t-k: may be canceled by user: check if status changes back to 1
     i = 0
     while True:
-        pps = queryPrinterScanStatus(SERVER_INSTANCE_ID)
+        pps = query_printer_scan_status(SERVER_INSTANCE_ID)
         if pps == 2:
             break
         elif pps == 1:
-            pushServerOptions()
+            push_server_options()
             print('Reconnected, waiting for user selection ...')
-            # print ' '*4 + 'printer scan status: ' + str(queryPrinterScanStatus(SERVER_INSTANCE_ID)) + ' -- waiting for 2 ...'
+            # print ' '*4 + 'printer scan status: ' + str(query_printer_scan_status(SERVER_INSTANCE_ID)) + ' --
+            # waiting for 2 ...'
             continue
         i += 1
         if i % 300 == 0:
-            refreshServer()
+            server_refresh()
         time.sleep(1)
     print(' ' * 4 + 'Got it!')
 
-    user_selection = queryUserOptions()
+    user_selection = query_user_options()
     print('Options selected by user:', user_selection)
 
-    scanAndSave(user_selection)
+    scan_and_save(user_selection)
 
 
 # t-k: method to automatically determine translation from scanner command (received by server) to sane command
 #     was written for sizes but may be adapted to other translations
-def autoconfigDic(dic_name, xmlKey, preferred):
+def autoconfig_dic(dic_name, xml_key, preferred):
     if dic_name not in globals():
         try:
             # t-k: get available options from XML file that may be received by server
@@ -360,18 +364,18 @@ def autoconfigDic(dic_name, xmlKey, preferred):
             capxmlfile.close()
             xmlroot = ET.fromstring(capxmldata)
             sizes = []
-            for size in xmlroot.iter(xmlKey):
+            for size in xmlroot.iter(xml_key):
                 sizes.append(size.attrib['ID'])
             # t-k: get available size options for SANE device
-            saneSizes = saneSingleton["page_format"].constraint
+            sane_sizes = saneSingleton["page_format"].constraint
             # t-k: match these two sets together and save as dic_name (e.g. SIZE2SANE)
             dic = {}
             for sizeID in sizes:
-                sizeLst = sizeID.split('_')[1:]  # t-k: may be > 1 part, e.g. ['B5', 'JIS']
+                size_lst = sizeID.split('_')[1:]  # t-k: may be > 1 part, e.g. ['B5', 'JIS']
                 candidates = []
-                for saneSize in saneSizes:
+                for saneSize in sane_sizes:
                     flag = True
-                    for sizeElm in sizeLst:
+                    for sizeElm in size_lst:
                         flag = flag and sizeElm.lower() in saneSize.lower()
                     # t-k: save combination if all parts match sane size and
                     #     rotated takes precedence over non-rotated
@@ -392,7 +396,7 @@ def autoconfigDic(dic_name, xmlKey, preferred):
 saneSingleton = None
 
 
-def getSaneInstance():
+def get_sane_instance():
     global saneSingleton
     if saneSingleton:
         return saneSingleton
@@ -412,38 +416,38 @@ def getSaneInstance():
                 if MODIFIED_SANE and e.message.startswith('no such scan device'):
                     print("Proxy scan 'device' not found, restarting proxies and trying again ...", file=sys.stderr)
                     # t-k: restart proxies
-                    exitProxies()
-                    startProxies()
+                    exit_proxies()
+                    start_proxies()
                 else:
                     print('Problem connecting to scanner, trying again in 10s ...', file=sys.stderr)
                     traceback.print_exc(file=sys.stderr)
                     time.sleep(10)
             else:
                 # t-k: if SIZE2SANE / ... haven't been given in config file, try to automatically configure them
-                autoconfigDic('SIZE2SANE', 'Size',
-                              'rotated')  # t-k: f.l.t.r. -> name of dict, xml key, preferred sane option
+                # t-k: f.l.t.r. -> name of dict, xml key, preferred sane option
+                autoconfig_dic('SIZE2SANE', 'Size', 'rotated')
                 break
 
         print("Connected to scanner.")
         return saneSingleton
 
 
-def scanAndSave(user_selection, imgs=None):
+def scan_and_save(user_selection, imgs=None):
     global saneSingleton  # t-k: if cache needs to be reset
 
     # t-k: to raise file index independent of file extension
     #     so no more same file names with different extensions
-    def existsFileWithOtherExtension(baseFileName):
+    def exists_file_with_other_extension(base_filename):
         from glob import glob
-        searchPattern = baseFileName + '.*'
-        return bool(glob(searchPattern))
+        search_pattern = base_filename + '.*'
+        return bool(glob(search_pattern))
 
     # t-k: change ownership of scan file
-    def chownFile(fileName):
+    def chown_file(filename):
         if 'OWNER_UID' in globals():
             uid = int(OWNER_UID)
             gid = pwd.getpwuid(uid).pw_gid
-            os.chown(fileName, uid, gid)
+            os.chown(filename, uid, gid)
 
     # print 'Device options:   ', s.get_options()
     # print 'Device parameters:', s.get_parameters()
@@ -457,9 +461,9 @@ def scanAndSave(user_selection, imgs=None):
 
     # Initialize scan
 
-    def initScan():
+    def init_scan():
         print("Scanning ...")
-        s = getSaneInstance()
+        s = get_sane_instance()
         s.mode = mode
         s.resolution = dpi
         s.page_format = size  # t-k: bugfix page_format is correct (not page-format)
@@ -467,50 +471,50 @@ def scanAndSave(user_selection, imgs=None):
         return imgs, s
 
     if not imgs:
-        imgs, s = initScan()
+        imgs, s = init_scan()
 
     # Process images
-    outputFiles = []
+    output_files = []
     index = 1
     date = datetime.datetime.now().strftime("%Y-%m-%d")
     while True:
         try:
             for im in imgs:
-                fileExists = True
-                while (fileExists):
-                    baseFileName = Template(user_selection["output"]).safe_substitute(date=date, uid="%02d" % index,
-                                                                                      # t-k: index formatted with padding zero
-                                                                                      homedir=HOME_DIR)  # t-k: automatically detect home dir ('~')
-                    fileName = baseFileName + '.' + EXTENSIONS[user_selection["format"]]  # t-k: seperate baseFileName
-                    fileExists = existsFileWithOtherExtension(
-                        baseFileName)  # t-k: raise index independent of file extension
+                file_exists = True
+                while file_exists:
+                    base_filename = Template(user_selection["output"])\
+                        .safe_substitute(date=date, uid="%02d" % index,  # t-k: index formatted with padding zero
+                                         homedir=HOME_DIR)  # t-k: automatically detect home dir ('~')
+                    filename = base_filename + '.' + EXTENSIONS[user_selection["format"]]  # t-k: seperate base_filename
+                    file_exists = exists_file_with_other_extension(
+                        base_filename)  # t-k: raise index independent of file extension
                     index += 1
                 # t-k: rotate image if necessary
                 if re.match('.*rotate', size, re.IGNORECASE):
                     im = im.rotate(270)
                 # t-k: print log of applying user filters only if there are any
                 if len(user_selection['filters']):
-                    print("Applying user filters to " + fileName + " ...")
+                    print("Applying user filters to " + filename + " ...")
                     for userFilter in user_selection['filters']:
                         im = userFilter(im)  # t-k: replaced img with im
-                print("Saving " + fileName + " ...")
+                print("Saving " + filename + " ...")
                 im.info['dpi'] = (dpi, dpi)
                 im.info['resolution'] = (dpi, dpi)
-                im.save(fileName, dpi=(dpi, dpi), resolution=dpi)
-                chownFile(fileName)  # t-k: change ownership of scan file
+                im.save(filename, dpi=(dpi, dpi), resolution=dpi)
+                chown_file(filename)  # t-k: change ownership of scan file
                 print("Done.")
-                outputFiles.append(fileName)
+                output_files.append(filename)
         except Exception as e:
             if e == 'Error during device I/O':
                 if MODIFIED_SANE:
                     print('SANE ' + e + '. Restarting proxies and retrying ...', file=sys.stderr)
-                    exitProxies()
-                    startProxies()
+                    exit_proxies()
+                    start_proxies()
                 else:
                     print('SANE ' + e + '. Retrying ...', file=sys.stderr)
                 # s.close() # <- this causes seg fault
                 saneSingleton = None
-                imgs, s = initScan()
+                imgs, s = init_scan()
             else:
                 print('Whoops! Problem scanning (maybe version Samsung device driver >= 4.1 and multi-scan?):',
                       file=sys.stderr)
@@ -532,58 +536,59 @@ def scanAndSave(user_selection, imgs=None):
 
     # Concat PDFs and delete temp ones
     if (user_selection["format"] == "FORMAT_M_PDF" or user_selection["format"] == "FORMAT_PDF") and (
-            len(outputFiles) > 1):
+            len(output_files) > 1):
         print("Concatenating PDF files ...")
         output = PdfFileWriter()
-        for aFile in outputFiles:
-            inputPDF = PdfFileReader(file(aFile, "rb"))
-            output.addPage(inputPDF.getPage(0))
-        outputStream = io.BytesIO()  # file(outputFiles[0], "wb")
-        output.write(outputStream)
-        # outputStream.close()
+        for aFile in output_files:
+            input_pdf = PdfFileReader(file(aFile, "rb"))
+            output.addPage(input_pdf.getPage(0))
+        output_stream = io.BytesIO()  # file(output_files[0], "wb")
+        output.write(output_stream)
+        # output_stream.close()
 
-        for aFile in outputFiles:
+        for aFile in output_files:
             print("Deleting " + aFile + " ...")
             os.remove(aFile)
 
-        print("Writing final PDF " + outputFiles[0] + " ...")
-        outputFile = open(outputFiles[0], "wb")
-        outputFile.write(outputStream.getvalue())
-        outputFile.close()
-        chownFile(outputFiles[0])  # t-k: change ownership of scan file
+        print("Writing final PDF " + output_files[0] + " ...")
+        output_file = open(output_files[0], "wb")
+        output_file.write(output_stream.getvalue())
+        output_file.close()
+        chown_file(output_files[0])  # t-k: change ownership of scan file
         print("Done.")
 
 
-def delPIDFile():
+def del_pid_file():
     # t-k: delete PID only if it exists and if not caught signal SIGQUIT (3, with Strg+\)
     if CAUGHT_SIGQUIT:
-        print('Did not remove PID file: ' + options.pidfile + '\n' + ' ' * 4 + \
+        print('Did not remove PID file: ' + options.pidfile + '\n' + ' ' * 4 +
               'because of the SIGQUIT signal caught.')
     else:
         if os.path.exists(options.pidfile):
             os.remove(options.pidfile)
             print('Removed PID file: ' + options.pidfile)
         else:
-            print('Could not remove PID file: ' + options.pidfile + '\n' + ' ' * 4 + \
+            print('Could not remove PID file: ' + options.pidfile + '\n' + ' ' * 4 +
                   "because it was already deleted (probably by 'sudo service samsungScannerServer stop').")
 
 
-def serverUIDgen():
-    '''gerate a UniqueID for this server based on SERVER_NAME and hostname
-       using md5 as hash method
-    '''
+def server_uid_gen():
+    """
+    generate a UniqueID for this server based on SERVER_NAME and hostname using md5 as hash method
+    """
     from hashlib import md5
 
     servername = SERVER_NAME
     hostname = platform.node()
 
-    def hash2halfLength2int(hashString):
-        '''convert hash string to half its length
+    def hash2half_length2int(hash_string):
+        """
+        convert hash string to half its length
            watch out: returns int (not str)
-        '''
-        half_length = int(len(hashString) / 2)
-        part1 = hashString[:half_length]
-        part2 = hashString[half_length:]
+        """
+        half_length = int(len(hash_string) / 2)
+        part1 = hash_string[:half_length]
+        part2 = hash_string[half_length:]
         half_hash_int = int(part1, 16) + int(part2, 16)
         # restrict to max. 16 (hex) characters
         half_hash_int %= (256 ** 8)
@@ -592,28 +597,27 @@ def serverUIDgen():
     # use md5 as hash method -> length 32
     server_hash = md5(servername.encode('utf-8')).hexdigest()
     host_hash = md5(hostname.encode('utf-8')).hexdigest()
-    server_hash_half_int = hash2halfLength2int(server_hash)
-    host_hash_half_int = hash2halfLength2int(host_hash)
-    serverUID_int = server_hash_half_int + host_hash_half_int
+    server_hash_half_int = hash2half_length2int(server_hash)
+    host_hash_half_int = hash2half_length2int(host_hash)
+    server_uid_int = server_hash_half_int + host_hash_half_int
     # restrict to max. 16 (hex) characters
-    serverUID_int %= (256 ** 8)
+    server_uid_int %= (256 ** 8)
     # convert to hex
-    serverUID = hex(serverUID_int).replace("0x", "").replace("L", "")
-    return serverUID
+    return hex(server_uid_int).replace("0x", "").replace("L", "")
 
 
 # ########################## SIGNAL HANDLING ############################
 
-# t-k: handle some signals to trigger normal exit (and atexit then triggers its own stuff (delPID, unregisterServer))
-def sigHandler(signum, stack=None):
+# t-k: handle some signals to trigger normal exit (and atexit then triggers its own stuff (delPID, server_unregister))
+def sig_handler(signum, stack=None):
     sig = convSignum2Sig[signum]
     if sig in ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGTERM']:
-        exitCode = convSig2exitCode.get(sig, 1)
-        print("Caught signal %d '%s', exiting with code %d ..." % (signum, sig, exitCode))
+        exit_code = convSig2exitCode.get(sig, 1)
+        print("Caught signal %d '%s', exiting with code %d ..." % (signum, sig, exit_code))
         if sig == 'SIGQUIT':
             global CAUGHT_SIGQUIT
             CAUGHT_SIGQUIT = True
-        sys.exit(exitCode)
+        sys.exit(exit_code)
     # for other signals
     else:
         pass
@@ -636,7 +640,7 @@ convSig2exitCode = {
 for i in ['SIGINT', 'SIGQUIT', 'SIGTERM', 'SIGHUP']:
     try:
         signum = getattr(signal, i)
-        signal.signal(signum, sigHandler)
+        signal.signal(signum, sig_handler)
         convSignum2Sig[signum] = i
     except RuntimeError as m:
         pass  # t-k: do not consider signals like SIGKILL, which cannot be handled (by definition)
@@ -699,7 +703,7 @@ class LogFile(object):
         self.buffer += msg
         lines = self.buffer.splitlines()
         # print>>sys.stderr,lines
-        if (self.buffer.count('\n') == len(lines)):
+        if self.buffer.count('\n') == len(lines):
             self.buffer = ""
         else:
             # Last line was not \n terminated
@@ -712,9 +716,9 @@ class LogFile(object):
             handler.flush()
 
 
-class filterEmptyLines(logging.Filter):
+class FilterEmptyLines(logging.Filter):
     def filter(self, record):
-        return (len(record.msg) != 0)
+        return len(record.msg) != 0
 
 
 # t-k: classes that handle logging from multiple processes
@@ -796,7 +800,7 @@ def listener_configurer():
         root = logging.getLogger()
         h = logging.handlers.RotatingFileHandler(filename=LOG_NAME, maxBytes=LOG_MAXBYTES, backupCount=LOG_BACKUPCOUNT)
         f = logging.Formatter(fmt='%(asctime)s %(name)-12s %(levelname)-8s %(message)s', datefmt='%m-%d-%y %H:%M:%S')
-        fil = filterEmptyLines()
+        fil = FilterEmptyLines()
         h.setFormatter(f)
         h.addFilter(fil)
         root.addHandler(h)
@@ -818,7 +822,8 @@ def listener_process(queue, configurer):
             # raise
             pass  # handled by signal and atexit
         except:
-            import sys, traceback
+            import sys
+            import traceback
             print('Whoops! Problem:', file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
 
@@ -855,7 +860,7 @@ if __name__ == '__main__':
     sys.stderr = LogFile('stderr')
 
 
-    def exitListener():
+    def exit_listener():
         logQ.put_nowait(None)
 
 
@@ -864,8 +869,8 @@ if __name__ == '__main__':
     print("# Initiating version " + __version__)
     print("###########################")
 
-    print('At program termination joining log listener process with:\n' + ' ' * 4 + \
-          str(atexit.register(exitListener)))
+    print('At program termination joining log listener process with:\n' + ' ' * 4 +
+          str(atexit.register(exit_listener)))
 
     # Logging configuration file
     print("Used '%s' as configuration file." % CONFIG_FILE)
@@ -892,14 +897,14 @@ if __name__ == '__main__':
         imgs = []
         for imageFile in options.imageFiles:
             imgs.append(Image.open(imageFile))
-        scanAndSave(OPTIONS[options.optionsIndex], imgs)
+        scan_and_save(OPTIONS[options.optionsIndex], imgs)
         sys.exit(0)
 
     # Daemon mode
     if options.daemon and options.pidfile:
         print("Write PID to file: " + options.pidfile)
         print('At program termination removing PID file (if it still exists and not caught SIGQUIT) with:\n' +
-              ' ' * 4 + str(atexit.register(delPIDFile)))
+              ' ' * 4 + str(atexit.register(del_pid_file)))
         pid = str(os.getpid())
         file(options.pidfile, 'w+').write("%s\n" % pid)
 
@@ -913,8 +918,9 @@ print('The following was automatically configured.')
 
 # t-k: Automatic configuration -> Log
 def print_autoconfig(variable, variable_name, no_quotes=False):
-    '''add automatically configured VARIABLE to a list that is later 
-       printed to log'''
+    """
+    add automatically configured VARIABLE to a list that is later printed to log
+    """
     if no_quotes:
         quote = ""
     else:
@@ -923,13 +929,13 @@ def print_autoconfig(variable, variable_name, no_quotes=False):
 
 
 # t-k: function to extract valid IPv4s
-def extractIPs(fileContent):
-    pattern = r"((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)([ (\[]?(\.|dot)[ )\]]?(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3})"
-    ips = [each[0] for each in re.findall(pattern, fileContent)]
+def extractIPs(file_content):
+    re_ip = r"((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)([ (\[]?(\.|dot)[ )\]]?(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3})"
+    ips = [each[0] for each in re.findall(re_ip, file_content)]
     # print(ips)
     for item in ips:
         location = ips.index(item)
-        ip = re.sub("[ ()\[\]]", "", item)
+        ip = re.sub(r"[ ()\[\]]", "", item)
         ip = re.sub("dot", ".", ip)
         ips.remove(item)
         ips.insert(location, ip)
@@ -937,7 +943,7 @@ def extractIPs(fileContent):
 
 
 # t-k: Get scanner name automatically, try again if nothing found (e.g. no network connection)
-if not 'SCANNER_SANE_NAME' in globals():
+if 'SCANNER_SANE_NAME' not in globals():
     while True:
         print("Init SANE ...")
         sane.init()  # t-k: bugfix, can't find any devs without init
@@ -947,7 +953,7 @@ if not 'SCANNER_SANE_NAME' in globals():
                 SCANNER_SANE_NAME = dev[0]
                 print_autoconfig(SCANNER_SANE_NAME, 'SCANNER_SANE_NAME')
                 break
-        if not 'SCANNER_SANE_NAME' in globals():
+        if 'SCANNER_SANE_NAME' not in globals():
             if devs:
                 tmpinsert = ' SAMSUNG'
             else:
@@ -957,7 +963,7 @@ if not 'SCANNER_SANE_NAME' in globals():
         else:
             break
 
-if not 'SERVER_NAME' in globals():
+if 'SERVER_NAME' not in globals():
     SERVER_NAME = platform.node()  # t-k: = hostname
     print_autoconfig(SERVER_NAME, 'SERVER_NAME')
 
@@ -1026,8 +1032,8 @@ for i in range(1, len(dirsToMake)):
     dirToMake = "/" + "/".join(dirsToMake[0:i + 1])
     if os.path.lexists(dirToMake):
         if not os.path.isdir(dirToMake):
-            raise OSError('Invalid OUTPUT_PREFIX given in configuration file.\n' + \
-                          ' ' * 9 + 'The path specified exists, but is not a directory!\n' + \
+            raise OSError('Invalid OUTPUT_PREFIX given in configuration file.\n' +
+                          ' ' * 9 + 'The path specified exists, but is not a directory!\n' +
                           ' ' * 9 + "You should either change OUTPUT_PREFIX or check '%s' and move or rename it."
                           % dirToMake)
     else:
@@ -1049,45 +1055,53 @@ if __name__ == '__main__':
 
 # t-k: class that handles hex messages
 class HexMessage(object):
-    '''instances can store, return and prettyprint hex messages'''
+    """
+    instances can store, return and prettyprint hex messages
+    """
 
-    def __init__(self, hexIn, rawIn=False, enlargeTo=False):
-        '''hexIn should be either in the form '1b:a8:13:fb' or 
-           '1b a8 13 fb' (rawIn=False, default) or as decoded python  
-           character string '\x1b\xa8\x13\xfb' (rawIn=True)
-           
-           default message size is length of hexIn, set enlargeTo > 0
-           to enable enlarging with zero bytes, e.g. enlargeTo=255 to
-           end up with message length of at least 255 bytes'''
-        if rawIn:
-            msg = hexIn
+    def __init__(self, hex_in, raw_in=False, enlarge_to: int = False):
+        """
+        hex_in should be either in the form '1b:a8:13:fb' or
+        '1b a8 13 fb' (raw_in=False, default) or as decoded python
+        character string '\x1b\xa8\x13\xfb' (raw_in=True)
+
+        default message size is length of hex_in, set enlarge_to > 0
+        to enable enlarging with zero bytes, e.g. enlarge_to=255 to
+        end up with message length of at least 255 bytes
+        """
+        if raw_in:
+            msg = hex_in
         else:
-            msg = hexIn.replace(':', '').replace(' ', '').replace('\n', '')
+            msg = hex_in.replace(':', '').replace(' ', '').replace('\n', '')
             msg = msg.decode('hex_codec')
-        if enlargeTo:
-            bytesLeft = enlargeTo - len(msg)
-            self.msg = (msg + '\x00' * bytesLeft)
+        if enlarge_to:
+            bytes_left = enlarge_to - len(msg)
+            self.msg = (msg + '\x00' * bytes_left)
         else:
             self.msg = msg
 
-    def getMsg(self):
-        '''return hex message as decoded character string'''
+    def get_msg(self):
+        """
+        return hex message as decoded character string
+        """
         return self.msg
 
     def startswith(self, prefix, start=0, end=sys.maxsize):
-        '''analogous to str.startswith, takes HexMessage instance as prefix
-           might also be a tuple of HexMessage instances'''
+        """
+        analogous to str.startswith, takes HexMessage instance as prefix
+        might also be a tuple of HexMessage instances
+        """
         if isinstance(prefix, tuple):
-            msgLst = []
+            msg_lst = []
             for p in prefix:
-                msgLst.append(p.getMsg())
-            prefix = tuple(msgLst)
+                msg_lst.append(p.get_msg())
+            prefix = tuple(msg_lst)
         else:
-            prefix = prefix.getMsg()
+            prefix = prefix.get_msg()
         return self.msg.startswith(prefix, start, end)
 
     def __eq__(self, other):
-        return self.msg == other.getMsg()
+        return self.msg == other.get_msg()
 
     def __hash__(self):
         return hash(self.msg)
@@ -1107,14 +1121,18 @@ class HexMessage(object):
 # t-k: proxy subprocess classes
 
 class ProxyError(Exception):
-    '''exception to raise for handling proxy specific errors'''
+    """
+    exception to raise for handling proxy specific errors
+    """
     pass
 
 
 class ProxyProcess(multiprocessing.Process):
-    '''a subprocess that acts as a man in the middle (MITM) proxy between 
-       scanner and workstation, so it can interfere with the messages 
-       being sent back and forth'''
+    """
+    a subprocess that acts as a man in the middle (MITM) proxy between
+    scanner and workstation, so it can interfere with the messages
+    being sent back and forth
+    """
     BUFFERSIZE = 1240
     SERVER_IP = ''
     SCANNER_IP = SCANNER_IP
@@ -1128,9 +1146,11 @@ class ProxyProcess(multiprocessing.Process):
         self._stoprequest.set()
         super(ProxyProcess, self).join(timeout)
 
-    def _printLog(self, debugLevel, *content):
-        '''debugLevel -> of this log entry'''
-        if self.DEBUGLEVEL >= debugLevel:
+    def _printLog(self, debug_level, *content):
+        """
+        debug_level -> of this log entry
+        """
+        if self.DEBUGLEVEL >= debug_level:
             print(str(self.__class__).split('.')[1][:-2] + ':', end=' ')
             for element in content[:-1]:
                 print(element, end=' ')
@@ -1138,7 +1158,9 @@ class ProxyProcess(multiprocessing.Process):
 
 
 class UDProxy(ProxyProcess):
-    '''MITM UDP proxy on port 161 (SNMP)'''
+    """
+    MITM UDP proxy on port 161 (SNMP)
+    """
     PORT = 161
     PROTOCOL = 'UDP'
 
@@ -1154,17 +1176,17 @@ class UDProxy(ProxyProcess):
         self._printLog(1, 'Initiated client connection to scanner port %d (%s) ...' % (self.PORT, self.PROTOCOL))
         while not self._stoprequest.is_set():
             try:
-                fromWS, addrWS = self.serverConn.recvfrom(self.BUFFERSIZE)
-                self._printLog(3, 'received %4d bytes from %s:%5d' % (len(fromWS), addrWS[0], addrWS[1]))
+                from_ws, addr_ws = self.serverConn.recvfrom(self.BUFFERSIZE)
+                self._printLog(3, 'received %4d bytes from %s:%5d' % (len(from_ws), addr_ws[0], addr_ws[1]))
             except socket.timeout:
                 continue
             self.serverConn.settimeout(None)
-            sentSizeClient = self.clientConn.sendto(fromWS, (self.SCANNER_IP, self.PORT))
-            self._printLog(3, 'sent     %4d bytes to   %s:%5d' % (sentSizeClient, self.SCANNER_IP, self.PORT))
-            fromScanner, addrSc = self.clientConn.recvfrom(self.BUFFERSIZE)
-            self._printLog(3, 'received %4d bytes from %s:%5d' % (len(fromScanner), addrSc[0], addrSc[1]))
-            sentSizeServer = self.serverConn.sendto(fromScanner, (addrWS[0], addrWS[1]))
-            self._printLog(3, 'sent     %4d bytes to   %s:%5d' % (sentSizeServer, addrWS[0], addrWS[1]))
+            sent_size_client = self.clientConn.sendto(from_ws, (self.SCANNER_IP, self.PORT))
+            self._printLog(3, 'sent     %4d bytes to   %s:%5d' % (sent_size_client, self.SCANNER_IP, self.PORT))
+            from_scanner, addr_sc = self.clientConn.recvfrom(self.BUFFERSIZE)
+            self._printLog(3, 'received %4d bytes from %s:%5d' % (len(from_scanner), addr_sc[0], addr_sc[1]))
+            sent_size_server = self.serverConn.sendto(from_scanner, (addr_ws[0], addr_ws[1]))
+            self._printLog(3, 'sent     %4d bytes to   %s:%5d' % (sent_size_server, addr_ws[0], addr_ws[1]))
             self.serverConn.settimeout(1.0)
         # execute when process is joined (closed)
         self.serverConn.close()
@@ -1173,78 +1195,81 @@ class UDProxy(ProxyProcess):
 
 
 class TCProxy(ProxyProcess):
-    '''MITM TCP proxy on port 9400'''
+    """
+    MITM TCP proxy on port 9400
+    """
     PORT = 9400
     PROTOCOL = 'TCP'
     SRCPORT = 0  # 2270 # for client connection with scanner, set to 0 if dynamic source port wanted
 
-    def __init__(self, queryQ, resultQ):
+    def __init__(self, query_q, result_q):
         super(TCProxy, self).__init__()
-        self.queryQ = queryQ
-        self.resultQ = resultQ
+        self.queryQ = query_q
+        self.resultQ = result_q
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind((self.SERVER_IP, self.PORT))
         self.server.listen(1)
         self.server.settimeout(1.0)
         self.clientConn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_conn = self.server_conn_addr = None
         if self.SRCPORT:
             self.clientConn.bind((self.SERVER_IP, self.SRCPORT))
-        self.npRequest = HexMessage('1b a8 20 fb 01 2c 01', enlargeTo=255)  # np = next page
+        self.npRequest = HexMessage('1b a8 20 fb 01 2c 01', enlarge_to=255)  # np = next page
 
-    def _checkNextPageStatus(self):
-        pleaseWait = HexMessage('a8 08 00 00 00 f9 00 00 01 00 1e', enlargeTo=255)
-        yesNewPage = HexMessage('a8 00 00 00 00 f9 00 00 01 00 1e', enlargeTo=255)
-        noMorePages = HexMessage('a8 04 00 00 00 f9 00 00 01 00 1e', enlargeTo=255)
-        canceling = HexMessage('a8 04 f9 00 00 00 00 01', enlargeTo=255)
+    def _check_next_page_status(self):
+        please_wait = HexMessage('a8 08 00 00 00 f9 00 00 01 00 1e', enlarge_to=255)
+        yes_new_page = HexMessage('a8 00 00 00 00 f9 00 00 01 00 1e', enlarge_to=255)
+        no_more_pages = HexMessage('a8 04 00 00 00 f9 00 00 01 00 1e', enlarge_to=255)
+        canceling = HexMessage('a8 04 f9 00 00 00 00 01', enlarge_to=255)
         result = None
         self.clientConn.settimeout(1.0)
         while not self._stoprequest.is_set():
             try:
-                sentSizeClient = self.clientConn.send(self.npRequest.getMsg())
+                sent_size_client = self.clientConn.send(self.npRequest.get_msg())
                 self._printLog(3, 'checking if there are more pages to come ...')
-                self._printLog(3, 'sent     %4d bytes to   scanner' % (sentSizeClient))
+                self._printLog(3, 'sent     %4d bytes to   scanner' % sent_size_client)
                 self._printLog(3, str(self.npRequest).split('\n')[0])
-                fromScanner = self.clientConn.recv(self.BUFFERSIZE)
-                frScHxMsg = HexMessage(fromScanner, rawIn=True)
-                self._printLog(3, 'received %4d bytes from scanner' % (len(fromScanner)))
-                self._printLog(3, str(frScHxMsg).split('\n')[0])
+                from_scanner = self.clientConn.recv(self.BUFFERSIZE)
+                fr_sc_hx_msg = HexMessage(from_scanner, raw_in=True)
+                self._printLog(3, 'received %4d bytes from scanner' % (len(from_scanner)))
+                self._printLog(3, str(fr_sc_hx_msg).split('\n')[0])
             except socket.timeout:
                 continue
-            if frScHxMsg == pleaseWait:
+            if fr_sc_hx_msg == please_wait:
                 self._printLog(3, '"please wait"')
                 time.sleep(0.5)
                 continue
-            elif frScHxMsg == yesNewPage:
+            elif fr_sc_hx_msg == yes_new_page:
                 result = 'yes new page'
                 self._printLog(1, '"%s"' % result)
                 break
-            elif frScHxMsg in [noMorePages, canceling]:
+            elif fr_sc_hx_msg in [no_more_pages, canceling]:
                 result = 'no more pages'
                 self._printLog(1, '"%s"' % result)
                 break
             else:
-                self._printLog(1, 'could not interpret answer from scanner,\n' + str(frScHxMsg) + '\nretrying ...')
+                self._printLog(1, 'could not interpret answer from scanner,\n' + str(fr_sc_hx_msg) + '\nretrying ...')
                 continue
         self.clientConn.settimeout(None)
         return result
 
     def run(self):
         result = None
-        nrConnect = 1
-        error3byteMsg = HexMessage('a8 28 00')
-        initMsg1 = HexMessage('1b a8 12 00')  # first sent by sane
-        initMsg2 = HexMessage('1b a8 16 00')  # second sent by sane
-        specMsg = HexMessage('1b a8 13 fb', enlargeTo=255)  # not sent by sane, but needed after initMsg1
-        # self.npRequest needed after initMsg2
+        nr_connect = 1
+        error3byte_msg = HexMessage('a8 28 00')
+        init_msg1 = HexMessage('1b a8 12 00')  # first sent by sane
+        init_msg2 = HexMessage('1b a8 16 00')  # second sent by sane
+        spec_msg = HexMessage('1b a8 13 fb', enlarge_to=255)  # not sent by sane, but needed after init_msg1
+        # self.npRequest needed after init_msg2
         self._printLog(1, 'Initating server listening on port %d (%s) ...' % (self.PORT, self.PROTOCOL))
         # main loop starting with connection initiation with workstation (proxy as server)
         while not self._stoprequest.is_set():
             try:
-                self.serverConn, self.serverConnAddr = self.server.accept()
+                self.server_conn, self.server_conn_addr = self.server.accept()
             except socket.timeout:
                 continue
-            self.serverConn.settimeout(1.0)
-            self._printLog(2, 'Accepted connection nr. %d from:' % nrConnect, self.serverConnAddr)
+            self.server_conn.settimeout(1.0)
+            self._printLog(2, 'Accepted connection nr. %d from:' % nr_connect, self.server_conn_addr)
             # (re)connect with scanner (proxy as client) if necessary
             while not self._stoprequest.is_set():
                 try:
@@ -1257,7 +1282,7 @@ class TCProxy(ProxyProcess):
                         raise
                 else:
                     self.clientConn.settimeout(None)
-                    self._printLog(1, 'Initiated client connection to scanner port %d (%s) ...' % \
+                    self._printLog(1, 'Initiated client connection to scanner port %d (%s) ...' %
                                    (self.PORT, self.PROTOCOL))
                 try:
                     self.clientConn.send('')
@@ -1276,7 +1301,7 @@ class TCProxy(ProxyProcess):
             while not self._stoprequest.is_set():
                 try:
                     try:
-                        fromWS = self.serverConn.recv(self.BUFFERSIZE)
+                        from_ws = self.server_conn.recv(self.BUFFERSIZE)
                     except socket.timeout:
                         try:
                             # blocking Queue.get call that times out after 50 ms
@@ -1284,79 +1309,79 @@ class TCProxy(ProxyProcess):
                         except queue.Empty:
                             continue
                         if query == 'check if page is coming':
-                            result = self._checkNextPageStatus()
+                            result = self._check_next_page_status()
                             if result:
                                 self.resultQ.put(result)
                         continue
                     except socket.error as e:
                         # connection reset by peer
                         if e.errno == errno.ECONNRESET:
-                            self.serverConn.close()
+                            self.server_conn.close()
                             break
                         else:
                             raise
-                    self.serverConn.settimeout(None)
-                    self._printLog(3, 'received %4d bytes from workstation' % (len(fromWS)))
-                    if HexMessage(fromWS, rawIn=True) == error3byteMsg:
-                        self._printLog(3, error3byteMsg)
+                    self.server_conn.settimeout(None)
+                    self._printLog(3, 'received %4d bytes from workstation' % (len(from_ws)))
+                    if HexMessage(from_ws, raw_in=True) == error3byte_msg:
+                        self._printLog(3, error3byte_msg)
                         # connected workstation too early before file chunk was complete
                         raise ProxyError('connected workstation too early, returning to communication with scanner')
                 except ProxyError as e:
                     self._printLog(3, 'ProxyError:', e)
                     pass  # did't send these 3 bytes to scanner, continue with scanner as if nothing happened
                 else:
-                    sentSizeClient = self.clientConn.send(fromWS)
-                    self._printLog(3, 'sent     %4d bytes to   scanner' % (sentSizeClient))
-                    self._printLog(3, str(HexMessage(fromWS, rawIn=True)).split('\n')[0])
-                    if sentSizeClient == 0:
-                        nrConnect += 1
-                        self.serverConn.close()
+                    sent_size_client = self.clientConn.send(from_ws)
+                    self._printLog(3, 'sent     %4d bytes to   scanner' % sent_size_client)
+                    self._printLog(3, str(HexMessage(from_ws, raw_in=True)).split('\n')[0])
+                    if sent_size_client == 0:
+                        nr_connect += 1
+                        self.server_conn.close()
                         break
                 # 250 ms timeout for (all but 1st) data packages from scanner to come in
                 self.clientConn.settimeout(0.25)
-                sentSizeserver = 0
-                retryAfter1240 = 0
-                sendingFile = False
+                sent_sizeserver = 0
+                retry_after1240 = 0
+                sending_file = False
                 # get package from scanner and send to workstation
                 #     loop if not timed out -> sending a file
                 while not self._stoprequest.is_set():
                     try:
-                        fromScanner = self.clientConn.recv(self.BUFFERSIZE)
-                        self._printLog(3, 'received %4d bytes from scanner' % (len(fromScanner)))
+                        from_scanner = self.clientConn.recv(self.BUFFERSIZE)
+                        self._printLog(3, 'received %4d bytes from scanner' % (len(from_scanner)))
                     except socket.timeout:
                         # endless retry if the 1st package was timed out (effectively no timeout at all for 1st package)
-                        if not sendingFile:
+                        if not sending_file:
                             continue
                         # retry 2 times if last package was 1240 bytes (effectively 3*250ms = 0.75s timeout
                         #     for these 1240 bytes follow up packages)
-                        if sentSizeserver == 1240 and retryAfter1240 < 3:
-                            retryAfter1240 += 1
+                        if sent_sizeserver == 1240 and retry_after1240 < 3:
+                            retry_after1240 += 1
                             continue
-                        sendingFile = False
+                        sending_file = False
                         self.clientConn.settimeout(None)
                         break
-                    retryAfter1240 = 0
-                    sentSizeserver = self.serverConn.send(fromScanner)
-                    self._printLog(3, 'sent     %4d bytes to   workstation' % (sentSizeserver))
-                    self._printLog(3, str(HexMessage(fromScanner, rawIn=True)).split('\n')[0])
-                    sendingFile = True  # after 1st data package
-                # special intermediate packages needed to be sent during the beginning after initMsg1/2
-                fromWSHxMsg = HexMessage(fromWS, rawIn=True)
-                if fromWSHxMsg in [initMsg1, initMsg2]:
-                    if fromWSHxMsg == initMsg1:
-                        toSend = specMsg
-                    elif fromWSHxMsg == initMsg2:
-                        toSend = self.npRequest
-                    sentSizeClient = self.clientConn.send(toSend.getMsg())
-                    self._printLog(3, 'sent     %4d bytes to   scanner' % (sentSizeClient))
-                    self._printLog(3, str(toSend).split('\n')[0])
-                    fromScanner = self.clientConn.recv(self.BUFFERSIZE)
-                    self._printLog(3, 'received %4d bytes from scanner' % (len(fromScanner)))
-                    self._printLog(3, str(HexMessage(fromScanner, rawIn=True)).split('\n')[0])
-                self.serverConn.settimeout(1.0)
+                    retry_after1240 = 0
+                    sent_sizeserver = self.server_conn.send(from_scanner)
+                    self._printLog(3, 'sent     %4d bytes to   workstation' % sent_sizeserver)
+                    self._printLog(3, str(HexMessage(from_scanner, raw_in=True)).split('\n')[0])
+                    sending_file = True  # after 1st data package
+                # special intermediate packages needed to be sent during the beginning after init_msg1/2
+                from_ws_hx_msg = HexMessage(from_ws, raw_in=True)
+                if from_ws_hx_msg in [init_msg1, init_msg2]:
+                    if from_ws_hx_msg == init_msg1:
+                        to_send = spec_msg
+                    elif from_ws_hx_msg == init_msg2:
+                        to_send = self.npRequest
+                    sent_size_client = self.clientConn.send(to_send.get_msg())
+                    self._printLog(3, 'sent     %4d bytes to   scanner' % sent_size_client)
+                    self._printLog(3, str(to_send).split('\n')[0])
+                    from_scanner = self.clientConn.recv(self.BUFFERSIZE)
+                    self._printLog(3, 'received %4d bytes from scanner' % (len(from_scanner)))
+                    self._printLog(3, str(HexMessage(from_scanner, raw_in=True)).split('\n')[0])
+                self.server_conn.settimeout(1.0)
         # execute when process is joined (closed)
         try:
-            self.serverConn.close()
+            self.server_conn.close()
         except AttributeError:
             pass
         self.server.close()
@@ -1366,8 +1391,10 @@ class TCProxy(ProxyProcess):
 
 # t-k: modifications to sane module's scanner handling
 class _ModSaneIterator(sane._SaneIterator):
-    '''modified next method communicating with TCP proxy subprocess
-       to enable multipage scanning'''
+    """
+    modified next method communicating with TCP proxy subprocess
+    to enable multipage scanning
+    """
 
     def __init__(self, device):
         sane._SaneIterator.__init__(self, device)
@@ -1378,9 +1405,9 @@ class _ModSaneIterator(sane._SaneIterator):
             if self.iteration != 0:
                 print('Another page coming?')
                 # tell TCP proxy to ...
-                queryQ.put('check if page is coming')
+                query_q.put('check if page is coming')
                 # get result back, with blocking Queue.get call
-                result = resultQ.get(True)
+                result = result_q.get(True)
                 self.device.cancel()
                 if result == 'yes new page':
                     pass
@@ -1404,14 +1431,18 @@ class _ModSaneIterator(sane._SaneIterator):
 
 
 class ModSaneDev(sane.SaneDev):
-    '''use modified _SaneIteror class'''
+    """
+    use modified _SaneIterator class
+    """
 
     def multi_scan(self):
         return _ModSaneIterator(self)
 
 
 def modsaneopen(devname):
-    '''Open a device for scanning using modified SaneDev class'''
+    """
+    Open a device for scanning using modified SaneDev class
+    """
     new = ModSaneDev(devname)
     return new
 
@@ -1424,11 +1455,11 @@ if __name__ == '__main__':
     # Calculate "ID" based on SERVER_NAME and hostname
     # t-k: use md5 hashing to get real unique IDs that take into account
     #     the whole strings rather than just the last 8 letters
-    SERVER_UID = serverUIDgen()
+    SERVER_UID = server_uid_gen()
 
-    while (True):
+    while True:
         try:
-            SERVER_INSTANCE_ID = registerServer()
+            SERVER_INSTANCE_ID = server_register()
         except Exception as e:
             logging.exception("Network or scanner not available (%s): waiting 10s and trying again ..." % e)
             time.sleep(10)  # Wait 10 seconds
@@ -1436,26 +1467,26 @@ if __name__ == '__main__':
             break
 
     # Unregister #t-k: with new function - easier to understand
-    print('At program termination unregistering server with:\n' + ' ' * 4 + \
-          str(atexit.register(unregisterServer)))
+    print('At program termination unregistering server with:\n' + ' ' * 4 +
+          str(atexit.register(server_unregister)))
 
     # t-k: initiate queues for communication with subprocesses and
     #     start the proxy server processes
     if MODIFIED_SANE:
 
-        def initQs():
-            global queryQ, resultQ
-            queryQ, resultQ = multiprocessing.Queue(), multiprocessing.Queue()
+        def init_qs():
+            global query_q, result_q
+            query_q, result_q = multiprocessing.Queue(), multiprocessing.Queue()
 
 
-        initQs()
+        init_qs()
 
 
-        def startProxies():
+        def start_proxies():
             global proxies
             while True:
                 try:
-                    proxies = [UDProxy(), TCProxy(queryQ, resultQ)]
+                    proxies = [UDProxy(), TCProxy(query_q, result_q)]
                 except socket.error as e:
                     if e.errno == errno.EADDRINUSE:  # address already in use
                         print('TCP proxy was restarted too soon, waiting 10s ...')
@@ -1468,31 +1499,31 @@ if __name__ == '__main__':
                 p.start()
 
 
-        startProxies()
+        start_proxies()
 
         # angelnu proxies not defined without MODIFIED_SANE
 
-        def exitProxies():
+        def exit_proxies():
             global proxies
             for p in proxies:
                 p.join()
 
 
-        print('At program termination joining proxy processes with:\n' + ' ' * 4 + \
-              str(atexit.register(exitProxies)))
+        print('At program termination joining proxy processes with:\n' + ' ' * 4 +
+              str(atexit.register(exit_proxies)))
 
     # angelnu Test the Sane connection (also works as a chache to be ready at scan time)
     # t-k: can only do this after proxies are established if modified sane method is used
     #     + only applicable if one server is used
     if SCANNER_CACHING:
-        if not getSaneInstance():
+        if not get_sane_instance():
             print("Could not connect to Scanner (" + SCANNER_SANE_NAME + ") via SANE.", file=sys.stderr)
             sys.exit(1)
 
     # Main program: keep scanning
     while True:
         try:
-            scannWorker()
+            scann_worker()
         except Exception:
             logging.exception("Something awful happened! Waiting 10 seconds before trying again.")
             time.sleep(10)  # Wait 10 seconds
