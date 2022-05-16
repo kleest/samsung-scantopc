@@ -1,0 +1,171 @@
+suld-scantopc (0.4.5-4) stable; urgency=low
+
+  * Updated dependencies
+
+-- Samsung Unified Linux Driver Repository <http://www.bchemnet.com/suldr/> Mon, 05 May 2014 14:07:00 -0600
+
+suld-scantopc (0.4.5-3) stable; urgency=low
+  * modify dependencies to allow use with latest driver
+
+-- Samsung Unified Linux Driver Repository <http://www.bchemnet.com/suldr/> Sun, 6 Oct 2013 13:49:00 -0600
+
+suld-scantopc (0.4.5-2) stable; urgency=high
+  * correctly set permissions on script
+  * remove dependency on python-snmp-common to always force python-snmp4
+
+-- Samsung Unified Linux Driver Repository <http://www.bchemnet.com/suldr/> Sun, 6 Oct 2013 06:44:00 -0600
+
+suld-scantopc (0.4.5-1) stable; urgency=low
+
+  * improved IPv4 extraction method out of SCANNER_SANE_NAME (thanks to frankentux)
+  * by default SIZE2SANE is now automatically configured, if this is not
+    possible user must edit conf file in order to make it work
+
+ -- Totally King <totally-king@web.de>  Wed, 02 Oct 2013 20:08:34 +0200
+
+suld-scantopc (0.4.4-1) stable; urgency=low
+
+  * added support for SCX-472x scanners which use 'FORMAT_PDF' (instead of FORMAT_M|S_PDF)
+    still user has to manually edit conf file to change occurences of FORMAT_M|S_PDF there
+
+ -- angelnu <does@not-exist.net>  Sat, 10 Aug 2013 09:19:41 +0200
+
+suld-scantopc (0.4.3-1) stable; urgency=low
+
+  * corrected minor errors in init script handling
+  * updated package description
+
+-- Samsung Unified Linux Driver Repository <http://www.bchemnet.com/suldr/> Sun, 4 Aug 2013 14:04:00 -0600
+
+suld-scantopc (0.4.3) stable; urgency=low
+
+  * improvements in error handling and logging
+  * first try of an option to avoid caching of scanner object (which
+    works), but closing the scanner session (to make the scanner
+    available to other servers that are registered at the scanner)
+    causes a seg fault (poor programming of C based sane extension?)
+
+ -- Totally King <totally-king@web.de>  Sun, 28 Jul 2013 20:01:19 +0200
+
+suld-scantopc (0.4.2) stable; urgency=HIGH
+
+  * fixed automatic detection of samsung scanner name
+  * fixed compatibility of recent changes with modified sane method
+  * changed waiting interval for connection from 30s to 10s
+
+ -- Totally King <totally-king@web.de>  Sat, 27 Jul 2013 19:21:32 +0200
+
+suld-scantopc (0.4.1-2) stable; urgency=low
+
+  * added python-six dependency
+  * additional improvements to init script handling
+
+-- Samsung Unified Linux Driver Repository <http://www.bchemnet.com/suldr/> Sun, 27 May 2013 20:45:00 -0600
+
+suld-scantopc (0.4.1-1) stable; urgency=low
+
+  * numerous small fixes
+  * circumvention for https://github.com/python-imaging/Pillow/issues/215
+  * improved init script handling
+  * prepared code for python 3
+  * retry connection to server upon boot until established
+
+-- Samsung Unified Linux Driver Repository <http://www.bchemnet.com/suldr/> [angelnu] Sun, 15 May 2013 20:40:00 -0600
+
+suld-scantopc (0.4.0) unstable; urgency=low
+
+  * Circumvention for https://github.com/python-imaging/Pillow/issues/215
+  * Made the code compatible with python 3. Some dependencies are not yet available for python3.
+
+ -- angelnu <http://www.bchemnet.com/suldr/>  Sat, 11 May 2013 23:28:19 +0200
+
+suld-scantopc (0.3.0-2) stable; urgency=low
+
+  * renaming to match changes in SULDR
+  * eliminated use of /opt/
+  * improved init script handling
+
+-- Samsung Unified Linux Driver Repository <http://www.bchemnet.com/suldr/> Sun, 5 May 2013 12:48:00 -0600
+
+samsungmfp-scantopc (0.3.0-1) precise; urgency=low
+
+  * fixed dependency issue with python-pysnmp* on ubuntu quantal (12.10)
+
+ -- Totally King <totally-king@web.de>  Wed, 03 Apr 2013 10:38:22 +0200
+
+samsungmfp-scantopc (0.3.0) stable; urgency=HIGH
+
+  * added modified sane module classes to enable multipage scanning on
+    CLX-3305W (can be disabled in config file). Modifications involve
+    TCP and UDP man in the middle proxy communication with the scanner, 
+    since the needed commands are not implemented in the SANE backend.
+    This can be deactivated in the config file, reverting to the original
+    unmodified sane module (probably better for other devices).
+  * revised logging code, so that it supports multiple processes and all
+    of them writing to a rotating log file
+  * some reorganization of code that (hopefully) makes more sense
+  * bugfix: scan size is not ignored anymore
+  * automatic 90° clockwise rotation of images that are scanned 'Rotated'
+    
+ -- Totally King <totally-king@web.de>  Mon, 25 Mar 2013 15:15:31 +0100
+
+samsungmfp-scantopc (0.2.4) unstable; urgency=low
+
+  * Now checking for errors when unregistering server.
+  * Restructured refreshServer function to actually do refreshing work.
+
+ -- Totally King <totally-king@web.de>  Sun, 17 Mar 2013 15:14:39 +0100
+
+samsungmfp-scantopc (0.2.3) unstable; urgency=HIGH
+
+  * bugfix of non responsive server after canceling or waiting too long
+    in 'scan to pc' menu on printer
+
+ -- Totally King <totally-king@web.de>  Fri, 15 Mar 2013 15:13:56 +0100
+
+samsungmfp-scantopc (0.2.2) unstable; urgency=low
+
+  * added sudoers file so users of group lp can now
+    'sudo service samsungScannerServer start' and the like
+    without password confirmation
+  * complete rewrite of method to generate unique IDs that are used
+    to identify the server in the printer. The former method used the last
+    8 characters of server name and hostname in hex encoding which could 
+    lead to name collisions if server name and hostname were identical.
+    New method involves md5 hashing of whole server name and hostname to 
+    minimize the risk of collisions in unique IDs.
+  * server process can now handle signals like SIGTERM to unregister 
+    itself from the printer and remove the PID file (if it still exists)
+    when terminated e.g. by 'sudo service samsungScannerServer stop'
+
+ -- Totally King <totally-king@web.de>  Wed, 13 Mar 2013 15:13:37 +0100
+
+samsungmfp-scantopc (0.2.1) unstable; urgency=HIGH
+
+  * bugfix of index error in user options: 1->0, 2->1, 3->2 etc.
+  * image files are now put by default in $HOME/Scans/ of whichever
+    OWNER you specify in config file (default: user with uid 1000)
+  * files are also changed to be owned by that user, not root
+  * bugfix of name error when trying to use a filter
+  * automatic handling of all station specific options in config file
+    if they are not given there (SCANNER_SANE_NAME, PRINTER_IP,
+    SERVER_NAME, OWNER, OWNER_UID)
+  * file scheme is now different: no more same file id but different
+    extension, e.g. if SCAN_2013-03-09__01.jpg exists the next PDF is 
+    named SCAN_2013-03-09__02.pdf
+  * added some more descriptive messages in log and some hopefully
+    better error messages
+  * only uncommented lines of config file are printed to log
+  * some code clean up for better understanding
+  * added possibility to run 'from scannerServer import *' from (i)python
+    session without starting the server but still able to test out
+    functions and so on
+
+ -- Totally King <totally-king@web.de>  Sat, 09 Mar 2013 15:11:32 +0100
+
+samsungmfp-scantopc (0.2.0) unstable; urgency=low
+
+  * Initial release.
+    (see: http://www.bchemnet.com/suldr/forum/index.php?topic=73.0)
+
+ -- angelnu <does@not-exist.net>  Sun, 30 Dec 2012 18:29:29 +0100
