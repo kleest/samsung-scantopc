@@ -68,14 +68,14 @@ import logging
 import logging.handlers
 import platform
 from optparse import OptionParser, OptionGroup
-from pyPdf import PdfFileWriter, PdfFileReader
+from PyPDF3 import PdfFileWriter, PdfFileReader
 import io
 import atexit
 import pwd #t-k: for automatically configured OUTPUT_PREFIX and OWNER(_UID)
 import signal #t-k: for correct handling of SIGTERM and so on (which atexit can't handle)
 import socket #t-k: needed for TCP and UDP proxy to interfere with scanner commands needed for multipage
 import multiprocessing #t-k: need subprocesses for TCP and UDP proxy
-import urllib2 #t-k: to automatically detect to be received scanning options
+from urllib import request
 try:
     import queue
 except ImportError:
@@ -156,7 +156,7 @@ def post_multipart(host, selector, fields, files, expectResponse=True):
         h.putheader('content-type', content_type)
         h.putheader('content-length', str(len(body)))
         h.endheaders()
-        h.send(body.encode('latin-1'))
+        h.send(body)
         if expectResponse:
             response = h.getresponse()
             return response.read()
@@ -171,24 +171,28 @@ def encode_multipart_formdata(fields, files):
     files is a sequence of (name, filename, value) elements for data to be uploaded as files
     Return (content_type, body) ready for httplib.HTTP instance
     """
-    BOUNDARY = '----------ThIs_Is_tHe_bouNdaRY_$'
-    CRLF = '\r\n'
+    BOUNDARY = b'----------ThIs_Is_tHe_bouNdaRY_$'
+    CRLF = b'\r\n'
     L = []
     for (key, value) in fields:
-        L.append('--' + BOUNDARY)
-        L.append('Content-Disposition: form-data; name="%s"' % key)
-        L.append('')
+        L.append(b'--' + BOUNDARY)
+        L.append(b'Content-Disposition: form-data; name="%d"' % key)
+        L.append(b'')
+        if type(value) != bytes:
+            value = value.encode("utf-8")
         L.append(value)
     for (key, filename, value) in files:
-        L.append('--' + BOUNDARY)
-        L.append('Content-Disposition: form-data; name="%s"; filename="%s"' % (key, filename))
-        L.append('Content-Type: application/octet-stream')
-        L.append('')
+        L.append(b'--' + BOUNDARY)
+        L.append(b'Content-Disposition: form-data; name="%d"; filename="%b"' % (key, filename.encode("utf-8")))
+        L.append(b'Content-Type: application/octet-stream')
+        L.append(b'')
+        if type(value) != bytes:
+            value = value.encode("utf-8")
         L.append(value)
-    L.append('--' + BOUNDARY + '--')
-    L.append('')
+    L.append(b'--' + BOUNDARY + b'--')
+    L.append(b'')
     body = CRLF.join(L)
-    content_type = 'multipart/form-data; boundary=%s' % BOUNDARY
+    content_type = b'multipart/form-data; boundary=%b' % BOUNDARY
     return content_type, body
 
 
@@ -235,7 +239,7 @@ def unregisterServer():
     #print result
     #<?xml version="1.0" encoding="UTF-8"?><root><S2PC_Regi UserID ="server" Result="DELETE_OK" InstanceID="140" /></root>
     
-    m = re.match('.*Result="DELETE_OK"', result)
+    m = re.match(b'.*Result="DELETE_OK"', result)
     if not m:
         raise NameError("Error unregistering server: "+result)
     else:
@@ -276,7 +280,7 @@ def pushServerOptions():
         ET.SubElement(listElement, 'DuplexScan').attrib['Value']="DUPLEX_OFF"
         ET.SubElement(listElement, 'Orientation').attrib['Value']="ORIENTATION_SIDEWAY"
     
-    MSG='<?xml version="1.0" encoding="UTF-8" ?>\r\n'+ET.tostring(root)
+    MSG=b'<?xml version="1.0" encoding="UTF-8" ?>\r\n'+ET.tostring(root)
     #MSG=ET.tostring(root, encoding="UTF-8")
     result = post_multipart(SCANNER_IP,'/IDS/ScanFaxToPC.cgi',[],[(1,"scantopc",MSG)],False)
 
@@ -324,7 +328,7 @@ def queryPrinterScanStatus(instanceID):
     try:
         result = querySNMPVariable(SCANNER_IP,(1,3,6,1,4,1,236,11,5,11,81,11,7,2,1,2,instanceID))
         #(ObjectName('1.3.6.1.4.1.236.11.5.11.81.11.7.2.1.2.29'), OctetString('\x00\x00\x00\x00'))
-        return ord(result[0][1][0])
+        return result[0][1][0]
     except Exception as e:
         if 'result' not in locals():
             result = None
@@ -383,7 +387,7 @@ def autoconfigDic(dic_name, xmlKey, preferred):
     if dic_name not in globals():
         try:
             #t-k: get available options from XML file that may be received by server
-            capxmlfile = urllib2.urlopen('http://%s/IDS/CAP.XML' % REAL_SCANNER_IP)
+            capxmlfile = request.urlopen('http://%s/IDS/CAP.XML' % REAL_SCANNER_IP)
             capxmldata = capxmlfile.read()
             capxmlfile.close()
             xmlroot = ET.fromstring(capxmldata)
@@ -391,7 +395,7 @@ def autoconfigDic(dic_name, xmlKey, preferred):
             for size in xmlroot.iter(xmlKey):
                 sizes.append(size.attrib['ID'])
             #t-k: get available size options for SANE device
-            saneSizes = saneSingleton.get_options()[5][-1]
+            saneSizes = saneSingleton["page_format"].constraint
             #t-k: match these two sets together and save as dic_name (e.g. SIZE2SANE)
             dic = {}
             for sizeID in sizes:
@@ -1436,7 +1440,7 @@ if __name__ == '__main__':
     while (True):
         try:    
            SERVER_INSTANCE_ID = registerServer()
-        except Exception, e:
+        except Exception as e:
             logging.exception("Network or scanner not available (%s): waiting 10s and trying again ..." % e)
             time.sleep(10) #Wait 10 seconds
         else:
