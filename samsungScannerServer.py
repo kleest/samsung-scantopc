@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-#
+# samsungScannerServer.py
 # Tool to interact with the "scan to PC" option in Samsung MFP like the CLX 3300
 #
-# Version 0.2
-# By angelnu (1/2013)
+# Copyright (C) 2022      Steffen Klee
+# Copyright (C) 2012-2013 angelnu & Totally King
 #
-# Version 0.3.0
-# Bug fixes and enhancement 
-# optimized for Samsung CLX-3305W (<Vid>04e8</Vid><Pid>3456</Pid>)
-# By totally-king (3/2013)
-#    (search 't-k:')
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 #
-# Version 0.4.5
-# By angelnu and totally-king (08/2013)
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
 #
-# Dependencies: python-imaging-sane, python-pysnmp-common, python-pypdf, scanner working in sane
-#                              #t-k: python-pysnmp4 is the test replacement only in quantal,
-#     but virtual package ...-common also exists
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 __version__ = "0.4.5"
 
