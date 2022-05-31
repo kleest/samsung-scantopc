@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Tool to interact with the "scan to PC" option in Samsung MFP like the CLX 3300
 #
