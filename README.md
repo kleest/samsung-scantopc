@@ -9,6 +9,13 @@ See `changelog.original` for the original changelog.
 
 * Python 3 compatibility
 * PEP 8 code style
+* Web UI for renaming scanned documents (see `tools/webui`)
+
+## Installation
+### Arch Linux
+* [Scanner Server](https://aur.archlinux.org/packages/samsung-scantopc)
+* [Web UI](https://aur.archlinux.org/packages/samsung-scantopc-webui)
+
 
 ## License
 This software is subject to the GNU General Public License v3.0 (GNU GPLv3).
