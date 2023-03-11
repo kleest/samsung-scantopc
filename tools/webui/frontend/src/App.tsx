@@ -7,7 +7,7 @@ import {DocumentList} from "ui/DocumentList";
 import {useUiStore} from "store/UiStore";
 
 import "normalize.css";
-import {IconEyeOff, IconRefresh} from "@tabler/icons";
+import {IconEyeOff, IconRefresh} from "@tabler/icons-react";
 import {PDFPreview} from "ui/PDFPreview";
 
 type AppProps = {};

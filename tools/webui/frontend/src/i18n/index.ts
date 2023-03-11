@@ -34,6 +34,13 @@ export const resources = {
     }
 };
 
+// https://www.i18next.com/overview/typescript#argument-of-type-defaulttfuncreturn-is-not-assignable-to-parameter-of-type-xyz
+declare module 'i18next' {
+    interface CustomTypeOptions {
+        returnNull: false;
+    }
+}
+
 i18n
     .use(initReactI18next)
     .use(LanguageDetector)
@@ -48,6 +55,8 @@ i18n
         interpolation: {
             escapeValue: false, // XSS protection not needed for react
         },
+
+        returnNull: false,
 
         resources,
     });

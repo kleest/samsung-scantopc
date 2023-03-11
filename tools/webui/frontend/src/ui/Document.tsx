@@ -1,6 +1,6 @@
 import React, {useState} from "react";
 import {useTranslation} from "react-i18next";
-import {IconDeviceFloppy, IconEye, IconSend} from "@tabler/icons";
+import {IconDeviceFloppy, IconEye, IconSend} from "@tabler/icons-react";
 
 export type DocumentJson = {
     name: string,
