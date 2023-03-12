@@ -1,5 +1,5 @@
-import * as React from 'react';
-import * as ReactDOM from "react-dom";
+import React from 'react';
+import ReactDOM from 'react-dom/client';
 
 import App from './App';
 import "./styles.scss";
@@ -7,10 +7,9 @@ import "./styles.scss";
 
 if (!new class { x: any }().hasOwnProperty('x')) throw new Error('Transpiler is not configured correctly');
 
-let mountNode = document.getElementById("root");
-ReactDOM.render(<App />, mountNode);
-
-/* react 18
-const root = createRoot(mountNode!);
-root.render(<App name="Jane" />);
-*/
+const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
+root.render(
+    <React.StrictMode>
+        <App />
+    </React.StrictMode>
+);
