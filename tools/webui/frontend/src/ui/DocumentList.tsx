@@ -3,16 +3,25 @@ import {useUiStore} from "store/UiStore";
 import {observer} from "mobx-react-lite";
 import {ChangeDocumentNameFunction, Document, DocumentJson, SendToOutDirFunction} from "ui/Document";
 import {useTranslation} from "react-i18next";
+import {styled, Table, TableBody, TableCell, TableHead, TableRow} from "@mui/material";
+import Title from "ui/Title";
 
-type Props = {
-};
 
-export const DocumentList: React.FC<Props> = observer(({}) => {
+const StyledTableRow = styled(TableRow)(({theme }) => ({
+    '&:nth-of-type(odd)': {
+        backgroundColor: theme.palette.action.hover,
+    },
+    // hide last border
+    '&:last-child td, &:last-child th': {
+        border: 0,
+    },
+}));
+
+export const DocumentList: React.FC = observer(({}) => {
     const {t} = useTranslation();
     const uiStore = useUiStore();
 
     const documents = uiStore.documents;
-    const documentsOut = uiStore.documentsOut;
     const changeDocumentName = (i: number) => {
         return ((newName) => uiStore.setDocument(i, {...documents[i], name: newName})) as ChangeDocumentNameFunction;
     };
@@ -20,46 +29,56 @@ export const DocumentList: React.FC<Props> = observer(({}) => {
         return (() => uiStore.moveDocumentToOutDir(i)) as SendToOutDirFunction;
     };
 
-    const documentsTable = <table>
-        <thead>
-        <tr>
-            <th>{t("documents.table.url")}</th>
-            <th>{t("documents.table.name")}</th>
-            <th>{}</th>
-        </tr>
-        </thead>
-        <tbody>
+    const documentsTable = <Table size="small">
+        <TableHead>
+            <TableRow>
+                <TableCell>{t("documents.table.url")}</TableCell>
+                <TableCell>{t("documents.table.name")}</TableCell>
+                <TableCell>{}</TableCell>
+            </TableRow>
+        </TableHead>
+        <TableBody>
         {documents.map((d: DocumentJson, i: number) =>
-            <tr key={d.name}>
+            <StyledTableRow key={d.name}>
                 <Document name={d.name} changeDocumentName={changeDocumentName(i)} sendToOutDir={sendToOutDir(i)}
                           url={uiStore.documentUrl(i, false)}
                           downloadUrl={uiStore.documentUrl(i, true)}
                           setPreviewUrl={uiStore.setPDFPreview}
                 />
-            </tr>)}
-        </tbody>
-    </table>;
+            </StyledTableRow>)}
+        </TableBody>
+    </Table>;
 
-    const documentsOutTable = <table>
-        <thead>
-            <tr>
-                <th>{t("documents.table.name")}</th>
-                <th></th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-        {documentsOut.map((d: DocumentJson, i: number) =>
-            <tr key={d.name}>
-                <Document name={d.name} />
-            </tr>)}
-        </tbody>
-    </table>;
-
-    return <div>
-        <h1>{t("documents.titleList")}</h1>
+    return <>
+        <Title>{t("documents.titleList")}</Title>
         {documentsTable}
-        <h1>{t("documents.titleOutList")}</h1>
+    </>;
+});
+
+export const DocumentListOut: React.FC = observer(({}) => {
+    const {t} = useTranslation();
+    const uiStore = useUiStore();
+
+    const documentsOut = uiStore.documentsOut;
+
+    const documentsOutTable = <Table size="small">
+        <TableHead>
+            <TableRow>
+                <TableCell>{t("documents.table.name")}</TableCell>
+                <TableCell></TableCell>
+                <TableCell></TableCell>
+            </TableRow>
+        </TableHead>
+        <TableBody>
+        {documentsOut.map((d: DocumentJson) =>
+            <StyledTableRow key={d.id}>
+                <Document name={d.name} />
+            </StyledTableRow>)}
+        </TableBody>
+    </Table>;
+
+    return <>
+        <Title>{t("documents.titleOutList")}</Title>
         {documentsOutTable}
-    </div>
+    </>
 });
