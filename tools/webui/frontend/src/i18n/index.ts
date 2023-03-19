@@ -46,7 +46,30 @@ export const resources = {
                 "buttonSave": "Speichern",
                 "buttonLoad": "Liste aktualisieren",
                 "buttonSendToOutDir": "In Ausgabeverzeichnis verschieben",
+                "buttonPreview": "Vorschau",
+                "buttonMerge": "Dokumente zusammenführen",
+                "table": {
+                    "name": "Name",
+                    "url": "Link",
+                    "preview": "Vorschau",
+                }
             },
+            "list": {
+                "empty": "Leere Liste",
+            },
+            "dialog": {
+                "merge": {
+                    "title": "Dokumente zusammenführen",
+                    "contentText": "Dokumente zum Zusammenführen im angegebenen Dateinamen auswählen. Die Reihenfolge der Dokumente im erzeugten Dokument" +
+                        " kann angepasst werden.",
+                    "addDocument": "Dokument hinzufügen",
+                    "mergedName": "Dateiname des erzeugten Dokuments"
+                }
+            },
+            "action": {
+                "ok": "Zusammenführen",
+                "cancel": "Abbrechen"
+            }
         }
     }
 };
