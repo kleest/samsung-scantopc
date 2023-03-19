@@ -1,9 +1,13 @@
+const debug = require("debug")("backend:server:documents");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
 const express = require("express");
 const router = express.Router();
+
+const PDFMerger = require('pdf-merger-js');
+
 
 function documentDir() {
     return path.resolve(process.env.DOCUMENT_DIR);
@@ -35,11 +39,28 @@ function findDocumentById(id, res, cb) {
             return res.status(500).json(err);
 
         const found = files.filter((ent) => ent.isFile() && documentId(documentPath(ent.name)) === id);
-        if (found.length === 0)
+        if (found.length === 0) {
+            debug(`Document not found ${id}`);
             return res.status(200).json(false);
+        }
 
         for (let ent of found)
             cb(ent);
+    });
+}
+
+function findDocumentsByIdsOrdered(ids, res, cb) {
+    readDocumentDir((err, files) => {
+        if (err)
+            return res.status(500).json(err);
+
+        const result = [];
+        for (const id of ids) {
+            const found = files.find((ent) => ent.isFile() && documentId(documentPath(ent.name)) === id);
+            if (found !== undefined)
+                result.push(found);
+        }
+        cb(result);
     });
 }
 
@@ -81,12 +102,43 @@ router.get("/list_outdir", (req, res) => {
             if (ent.isFile()) {
                 result.push({
                     "name": ent.name,
-                    "id": null,
+                    "id": documentId(documentOutPath(ent.name)),
                 });
             }
         }
         res.json(result);
     });
+});
+
+/**
+ * Merges multiple documents into one new document in the output directory with a new name.
+ * Body:
+ * {
+ *     "ids": ["abc123", "def456", ...],
+ *     "name": "outputFilename.pdf"
+ * }
+ */
+router.post("/merge", (req, res) => {
+    const body = req.body;
+    if (!body.ids || !body.name)
+        return res.status(400).send("Invalid params");
+    if (body.ids.length > 0) {
+        findDocumentsByIdsOrdered(body.ids, res, (ents) => {
+            (async() => {
+                try {
+                    const merger = new PDFMerger();
+                    for (const ent of ents) {
+                        console.log("Merging", documentPath(ent.name));
+                        await merger.add(documentPath(ent.name));
+                    }
+                    await merger.save(documentPath(path.basename(body.name)));
+                    res.json(true);
+                } catch (e) {
+                    res.status(500).json(e);
+                }
+            })();
+        });
+    }
 });
 
 /**
@@ -111,7 +163,7 @@ router.get("/:id/download", (req, res) => {
 
 function _rename_helper(oldPath, newPath, res) {
     if (fileExists(newPath))
-        return res.status(500).send("Target file already exists");
+        return res.status(403).send("Target file already exists");
     fs.rename(oldPath, newPath, (err) => {
         if (err)
             return res.status(500).json(err);

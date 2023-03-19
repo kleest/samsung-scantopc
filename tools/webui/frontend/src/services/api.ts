@@ -31,6 +31,13 @@ export default (config: Configuration) => {
                 url: `/documents/${id}/move_to_outdir`,
             });
         },
+        mergeDocuments(ids: string[], name: string) {
+            return apiClient.request({
+                method: "post",
+                url: `/documents/merge`,
+                data: {ids, name}
+            });
+        },
         getDocumentUrl(id: string, download: boolean) {
             return apiClient.getUri({
                 url: `/documents/${id}${download && "/download" || ""}`

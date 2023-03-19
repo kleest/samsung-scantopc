@@ -13,12 +13,29 @@ export const resources = {
                 "buttonLoad": "Refresh list",
                 "buttonSendToOutDir": "Send to output directory",
                 "buttonPreview": "Preview",
+                "buttonMerge": "Merge documents",
                 "table": {
                     "name": "Name",
                     "url": "Link",
                     "preview": "Preview",
                 }
             },
+            "list": {
+                "empty": "Empty list",
+            },
+            "dialog": {
+                "merge": {
+                    "title": "Merge Documents",
+                    "contentText": "Select documents to merge in a file under the given name. Documents may also be reordered to define order in final" +
+                        " document.",
+                    "addDocument": "Add document",
+                    "mergedName": "Merged document file name"
+                }
+            },
+            "action": {
+                "ok": "OK",
+                "cancel": "Cancel"
+            }
         }
     },
     de: {

@@ -4,12 +4,10 @@ import i18n from "i18n";
 import {I18nextProvider, useTranslation} from "react-i18next";
 import {observer} from "mobx-react-lite";
 import {
-    Box,
-    CircularProgress,
+    Box, CircularProgress,
     Container,
     createTheme,
-    CssBaseline,
-    IconButton,
+    CssBaseline, IconButton,
     Paper, Stack, ThemeProvider,
     useMediaQuery
 } from "@mui/material";
@@ -20,6 +18,7 @@ import {useUiStore} from "store/UiStore";
 
 import RefreshIcon from "@mui/icons-material/Refresh";
 import CloseIcon from "@mui/icons-material/Close";
+import MergeIcon from "@mui/icons-material/Merge";
 
 import {PDFPreview} from "ui/PDFPreview";
 
@@ -28,7 +27,8 @@ import '@fontsource/roboto/300.css';
 import '@fontsource/roboto/400.css';
 import '@fontsource/roboto/500.css';
 import '@fontsource/roboto/700.css';
-import {FlexStack, GrowingSpace} from "ui/ReusableComponents";
+import {GrowingSpace} from "ui/ReusableComponents";
+import {MergeDialog} from "ui/MergeDialog";
 
 
 type CardProps = {
@@ -56,6 +56,9 @@ const AppContent: React.FC = observer(({}) => {
     }, []);
 
     const [spin, setSpin] = useState(false);
+    const [mergeDialogShown, setMergeDialogShow] = useState(false);
+    const [mergeDialogLoading, setMergeDialogLoading] = useState(false);
+
     const hasPreview = !!uiStore.previewUrl;
 
     return (
@@ -67,8 +70,8 @@ const AppContent: React.FC = observer(({}) => {
                 <Container maxWidth={false} sx={{pt: 2, pb: 2, height: "100vh"}}>
                     <Stack direction="column" height={"100%"}>
                         {/* controls */}
-                        <FlexStack direction="row" sx={{
-                            flex: "0"
+                        <Stack direction="row" sx={{
+                            mb: 1
                         }}>
                             <IconButton title={t("documents.buttonLoad")} onClick={(e) => {
                                 setSpin(true);
@@ -77,11 +80,24 @@ const AppContent: React.FC = observer(({}) => {
                             }}>
                                 {spin ? <CircularProgress size={24}/> : <RefreshIcon/>}
                             </IconButton>
+                            {/* merge action */}
+                            <IconButton title={t("documents.buttonMerge")} onClick={() => setMergeDialogShow(true)}>
+                                <MergeIcon />
+                            </IconButton>
+                            <MergeDialog loading={mergeDialogLoading} shown={mergeDialogShown} onCancel={() => setMergeDialogShow(false)}
+                                         onConfirm={(selectedDocuments, newName) => {
+                                             setMergeDialogLoading(true);
+                                             uiStore.doMergeDocuments(selectedDocuments, newName).then(() => {
+                                                 setMergeDialogLoading(false);
+                                                 setMergeDialogShow(false);
+                                             });
+                                         }} />
+                            {/* -- */}
                             <GrowingSpace/>
                             {uiStore.previewUrl && <IconButton title={t("documents.buttonPreviewClose")} onClick={(e) => uiStore.setPDFPreview("")}>
                                 <CloseIcon/>
                             </IconButton>}
-                        </FlexStack>
+                        </Stack>
                         {/* document lists + PDF preview */}
                         <Grid container spacing={2}>
                             <Grid xs={12} lg={7} xl={hasPreview ? 5 : 7}>

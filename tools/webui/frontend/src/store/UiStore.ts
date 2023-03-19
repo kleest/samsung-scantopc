@@ -1,20 +1,25 @@
 import {RootStore, useRootStore} from "store/RootStore";
-import {action, makeObservable, observable, runInAction} from "mobx";
+import {action, makeAutoObservable, runInAction} from "mobx";
 import {fromPromise} from "mobx-utils";
 import {DocumentJson} from "ui/Document";
+import {ApiTypes} from "services/apiTypes";
 
 export class UiStore {
     private root: RootStore;
 
-    documents: any = [];
-    documentsOut: any = [];
+    documents: ApiTypes.DocumentList = [];
+    documentsOut: ApiTypes.DocumentList = [];
     documentsListPromise: any;
     documentsListOutPromise: any;
     documentsSetPromise: any;
     documentsMoveToOutPromise: any;
+    documentsMergePromise: any;
 
     // PDF preview
-    previewUrl: any = "";
+    previewUrl: string = "";
+
+    // merge dialog
+    mergeDocuments: string[] = [];
 
     // actions
     getDocuments = async () => {
@@ -30,6 +35,8 @@ export class UiStore {
         } finally {
             runInAction(() => {
                 this.documents = result;
+                // clear merge list since some documents may have been moved
+                this.mergeDocuments = [];
             });
         }
     };
@@ -67,7 +74,20 @@ export class UiStore {
     }
     moveDocumentToOutDir = async(i: number) => {
         const prms = this.root.api.moveDocumentToOutDir(this.documents[i].id);
-        this.documentsSetPromise = fromPromise(prms);
+        this.documentsMoveToOutPromise = fromPromise(prms);
+
+        try {
+            await prms;
+        } catch (err) {
+            console.log(err);
+        } finally {
+            await this.getDocuments();
+            await this.getDocumentsOut();
+        }
+    }
+    async doMergeDocuments(ids: string[], name: string) {
+        const prms = this.root.api.mergeDocuments(ids, name);
+        this.documentsMergePromise = fromPromise(prms);
 
         try {
             await prms;
@@ -87,19 +107,37 @@ export class UiStore {
         this.previewUrl = url;
     }
 
+    findDocument(id: string) {
+        return this.documents.find((document) => document.id === id);
+    }
+
+    addMergeDocument(id: string) {
+        this.mergeDocuments.push(id);
+    }
+
+    removeMergeDocument(id: string) {
+        const ix = this.mergeDocuments.indexOf(id);
+        if (ix >= 0)
+            this.mergeDocuments.splice(ix, 1);
+    }
+
+    moveMergeDocument(id: string, offset: number) {
+        const ix = this.mergeDocuments.indexOf(id);
+        if (ix >= 0) {
+            const el = this.mergeDocuments.splice(ix, 1)[0];
+            this.mergeDocuments.splice(ix + offset, 0, el);
+        }
+    }
+
+    // computed
+    get mergeDocumentsFull(): ApiTypes.DocumentList {
+        return this.mergeDocuments.map((id) => this.findDocument(id)!);
+    }
+
     constructor(root: RootStore) {
         this.root = root;
 
-        makeObservable(this, {
-            documents: observable,
-            documentsOut: observable,
-            documentsListPromise: observable,
-            documentsListOutPromise: observable,
-            documentsMoveToOutPromise: observable,
-            documentsSetPromise: observable,
-            previewUrl: observable,
-            getDocuments: action,
-        });
+        makeAutoObservable(this);
     }
 }
 
