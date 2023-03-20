@@ -51,6 +51,7 @@ export const resources = {
                 "buttonSave": "Speichern",
                 "buttonLoad": "Liste aktualisieren",
                 "buttonSendToOutDir": "In Ausgabeverzeichnis verschieben",
+                "buttonDelete": "Dokument löschen",
                 "buttonPreview": "Vorschau",
                 "buttonMerge": "Dokumente zusammenführen",
                 "table": {
@@ -69,10 +70,14 @@ export const resources = {
                         " kann angepasst werden.",
                     "addDocument": "Dokument hinzufügen",
                     "mergedName": "Dateiname des erzeugten Dokuments"
-                }
+                },
+                "confirmDeletion": {
+                    "title": "Dokument löschen?",
+                    "contentText": "Dokument {{name}} wirklich löschen?",
+                },
             },
             "action": {
-                "ok": "Zusammenführen",
+                "ok": "OK",
                 "cancel": "Abbrechen"
             }
         }
