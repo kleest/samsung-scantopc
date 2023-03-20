@@ -24,7 +24,6 @@ import ArrowDropUpIcon from "@mui/icons-material/ArrowDropUp";
 
 import {useUiStore} from "store/UiStore";
 import Typography from "@mui/material/Typography";
-import {FlexStack} from "ui/ReusableComponents";
 
 const ListItemTwoSecondaryActions = styled(ListItem)(({theme}) => ({
     "&.MuiListItem-secondaryAction": {
@@ -97,11 +96,11 @@ export const MergeDialog: React.FC<MergeDialogProps> = observer(({loading, shown
                        onChange={(e) => setMergedName(e.target.value)} label={t("dialog.merge.mergedName")} />
         </DialogContent>
         <DialogActions>
+            <Button disabled={loading} onClick={onCancel}>{t("action.cancel")}</Button>
             <Button disabled={loading || mergedName === "" || uiStore.mergeDocuments.length === 0} onClick={() => {
                 setMergedName("");
                 onConfirm(uiStore.mergeDocuments, mergedName + ".pdf");
             }}>{t("action.ok")}</Button>
-            <Button disabled={loading} onClick={onCancel}>{t("action.cancel")}</Button>
         </DialogActions>
     </Dialog>;
 });
