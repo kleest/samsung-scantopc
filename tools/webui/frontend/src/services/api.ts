@@ -31,6 +31,12 @@ export default (config: Configuration) => {
                 url: `/documents/${id}/move_to_outdir`,
             });
         },
+        deleteDocument(id: string) {
+            return apiClient.request({
+                method: "delete",
+                url: `/documents/${id}`,
+            });
+        },
         mergeDocuments(ids: string[], name: string) {
             return apiClient.request({
                 method: "post",

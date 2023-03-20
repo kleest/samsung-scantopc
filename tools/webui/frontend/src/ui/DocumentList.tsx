@@ -1,7 +1,7 @@
 import React from "react";
 import {useUiStore} from "store/UiStore";
 import {observer} from "mobx-react-lite";
-import {ChangeDocumentNameFunction, Document, DocumentJson, SendToOutDirFunction} from "ui/Document";
+import {ChangeDocumentNameFunction, DeleteDocumentFunction, Document, DocumentJson, SendToOutDirFunction} from "ui/Document";
 import {useTranslation} from "react-i18next";
 import {styled, Table, TableBody, TableCell, TableHead, TableRow} from "@mui/material";
 import Title from "ui/Title";
@@ -28,6 +28,9 @@ export const DocumentList: React.FC = observer(({}) => {
     const sendToOutDir = (i: number) => {
         return (() => uiStore.moveDocumentToOutDir(i)) as SendToOutDirFunction;
     };
+    const deleteDocument = (i: number) => {
+        return (() => uiStore.deleteDocument(i)) as DeleteDocumentFunction;
+    };
 
     const documentsTable = <Table size="small">
         <TableHead>
@@ -41,6 +44,7 @@ export const DocumentList: React.FC = observer(({}) => {
         {documents.map((d: DocumentJson, i: number) =>
             <StyledTableRow key={d.name}>
                 <Document name={d.name} changeDocumentName={changeDocumentName(i)} sendToOutDir={sendToOutDir(i)}
+                          deleteDocument={deleteDocument(i)}
                           url={uiStore.documentUrl(i, false)}
                           downloadUrl={uiStore.documentUrl(i, true)}
                           setPreviewUrl={uiStore.setPDFPreview}

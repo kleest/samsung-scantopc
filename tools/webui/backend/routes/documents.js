@@ -184,6 +184,23 @@ router.post("/:id", (req, res) => {
 });
 
 /**
+ * Deletes a document from the document directory.
+ */
+router.delete("/:id", (req, res) => {
+    const id = req.params.id;
+    findDocumentById(id, res, (ent) => {
+        const filePath = documentPath(ent.name);
+        if (!fileExists(filePath))
+            return res.status(404).send("File does not exist");
+        fs.unlink(filePath, (err) => {
+            if (err)
+                return res.status(500).json(err);
+            return res.json(true);
+        })
+    });
+});
+
+/**
  * Moves a document to the document output directory without changing its name.
  */
 router.post("/:id/move_to_outdir", (req, res) => {

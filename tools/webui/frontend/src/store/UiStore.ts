@@ -13,6 +13,7 @@ export class UiStore {
     documentsListOutPromise: any;
     documentsSetPromise: any;
     documentsMoveToOutPromise: any;
+    documentsDeletePromise: any;
     documentsMergePromise: any;
 
     // PDF preview
@@ -83,6 +84,18 @@ export class UiStore {
         } finally {
             await this.getDocuments();
             await this.getDocumentsOut();
+        }
+    }
+    async deleteDocument(i: number) {
+        const prms = this.root.api.deleteDocument(this.documents[i].id);
+        this.documentsDeletePromise = fromPromise(prms);
+
+        try {
+            await prms;
+        } catch (err) {
+            console.log(err);
+        } finally {
+            await this.getDocuments();
         }
     }
     async doMergeDocuments(ids: string[], name: string) {

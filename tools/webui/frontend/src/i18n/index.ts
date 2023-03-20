@@ -12,6 +12,7 @@ export const resources = {
                 "buttonSave": "Save",
                 "buttonLoad": "Refresh list",
                 "buttonSendToOutDir": "Send to output directory",
+                "buttonDelete": "Delete document",
                 "buttonPreview": "Preview",
                 "buttonMerge": "Merge documents",
                 "table": {
@@ -30,7 +31,11 @@ export const resources = {
                         " document.",
                     "addDocument": "Add document",
                     "mergedName": "Merged document file name"
-                }
+                },
+                "confirmDeletion": {
+                    "title": "Delete Document?",
+                    "contentText": "Do you really want to delete {{name}}?",
+                },
             },
             "action": {
                 "ok": "OK",
