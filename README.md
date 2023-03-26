@@ -9,7 +9,7 @@ See `changelog.original` for the original changelog.
 
 * Python 3 compatibility
 * PEP 8 code style
-* Web UI for renaming scanned documents (see `tools/webui`)
+* Web UI (see `tools/webui`) for renaming, merging and deleting scanned documents
 
 ## Installation
 ### Arch Linux
@@ -21,7 +21,7 @@ See `changelog.original` for the original changelog.
 This software is subject to the GNU General Public License v3.0 (GNU GPLv3).
 
 ```
-Copyright (C) 2022      Steffen Klee
+Copyright (C) 2022-2023 Steffen Klee
 Copyright (C) 2012-2013 angelnu & Totally King
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.

@@ -2,7 +2,7 @@
 # samsungScannerServer.py
 # Tool to interact with the "scan to PC" option in Samsung MFP like the CLX 3300
 #
-# Copyright (C) 2022      Steffen Klee
+# Copyright (C) 2022-2023 Steffen Klee
 # Copyright (C) 2012-2013 angelnu & Totally King
 #
 # This program is free software: you can redistribute it and/or modify
@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 import atexit
 import datetime
