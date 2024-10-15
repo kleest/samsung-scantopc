@@ -39,13 +39,13 @@ import sys
 import time
 import traceback
 import xml.etree.ElementTree as ET
-from optparse import OptionParser, OptionGroup
+from optparse import OptionGroup, OptionParser
 from string import Template
 from urllib import request
 
 import sane
 from PIL import Image
-from PyPDF3 import PdfFileWriter, PdfFileReader
+from PyPDF3 import PdfFileReader, PdfFileWriter
 from six.moves import http_client
 
 """
@@ -675,7 +675,9 @@ if len(args) != 0:
     parser.error("incorrect number of arguments")
 
 # Read configuration
-PATHS = ['.', '/etc']
+HOME_DIR=os.getenv("HOME", os.path.expanduser("~"))
+XDG_CONFIG_HOME=os.getenv("XDG_CONFIG_HOME", os.path.join(HOME_DIR, ".config"))
+PATHS = ['.', XDG_CONFIG_HOME, '/etc']
 CONFIG_FILENAME = 'samsungScannerServer.conf'
 CONFIG_FILE = None
 for path in PATHS:
