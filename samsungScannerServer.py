@@ -45,7 +45,7 @@ from urllib import request
 
 import sane
 from PIL import Image
-from PyPDF3 import PdfFileReader, PdfFileWriter
+from pypdf import PdfReader, PdfWriter
 from six.moves import http_client
 
 """
@@ -538,9 +538,9 @@ def scan_and_save(user_selection, imgs=None):
     if (user_selection["format"] == "FORMAT_M_PDF" or user_selection["format"] == "FORMAT_PDF") and (
             len(output_files) > 1):
         print("Concatenating PDF files ...")
-        output = PdfFileWriter()
+        output = PdfWriter()
         for aFile in output_files:
-            input_pdf = PdfFileReader(file(aFile, "rb"))
+            input_pdf = PdfReader(file(aFile, "rb"))
             output.addPage(input_pdf.getPage(0))
         output_stream = io.BytesIO()  # file(output_files[0], "wb")
         output.write(output_stream)
