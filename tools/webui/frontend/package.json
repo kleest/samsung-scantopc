@@ -2,7 +2,7 @@
   "name": "st.klee.samsung_scantopc.webui.frontend",
   "displayName": "Samsung ScanToPC WebUI Frontend",
   "description": "Web UI for the Samsung ScanToPc tool (frontend).",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "main": "index.tsx",
   "author": "Steffen Klee <steffen.klee@gmail.com>",
